@@ -271,6 +271,7 @@ const engineeringFinalFocusSeed = [
 
 let data = loadData();
 let session = loadSession();
+let currentView = session.admin ? "admin" : "home";
 let currentSubjectId = data.subjects[0]?.id || "";
 let activeTab = "points";
 let activeAdminPage = "dashboard";
@@ -300,6 +301,7 @@ let focusListScrollY = 0;
 let focusDetailTouchStartX = 0;
 let focusDetailTouchStartY = 0;
 let focusDetailTouchStartTime = 0;
+let isApplyingHistoryState = false;
 let adminQuestionFilters = {
   subject_id: "all",
   is_final_focus: "all",
@@ -865,6 +867,7 @@ async function startAnonymousReview() {
       saveSession();
     }
     render();
+    pushAppState("start-review");
   } catch (error) {
     console.error("Failed to enter anonymous review", error);
     const errorNode = $("#entryError");
@@ -1204,6 +1207,62 @@ function toast(message) {
   window.setTimeout(() => node.classList.remove("show"), 2400);
 }
 
+function normalizedFocusFilter(value = focusStatusFilter) {
+  return value === "favorite" ? "favorite" : "all";
+}
+
+function getRouteState() {
+  return {
+    view: currentView || "home",
+    subjectId: currentView === "subject" ? currentSubjectId || "" : "",
+    focusId: currentView === "subject" ? focusDrawerId || "" : "",
+    tab: "points",
+    filter: normalizedFocusFilter(),
+  };
+}
+
+function routeHashFromState(state) {
+  const hashParts = [];
+  if (state.view) hashParts.push(`view=${encodeURIComponent(state.view)}`);
+  if (state.subjectId) hashParts.push(`subject=${encodeURIComponent(state.subjectId)}`);
+  if (state.focusId) hashParts.push(`focus=${encodeURIComponent(state.focusId)}`);
+  if (state.filter) hashParts.push(`filter=${encodeURIComponent(state.filter)}`);
+  return hashParts.length ? `#${hashParts.join("&")}` : "#home";
+}
+
+function sameRouteState(a, b) {
+  return Boolean(
+    a &&
+      b &&
+      a.view === b.view &&
+      (a.subjectId || "") === (b.subjectId || "") &&
+      (a.focusId || "") === (b.focusId || "") &&
+      (a.filter || "all") === (b.filter || "all")
+  );
+}
+
+function pushAppState(reason = "", force = false) {
+  if (isApplyingHistoryState || !window.history?.pushState) return;
+  const state = getRouteState();
+  if (!force && sameRouteState(window.history.state, state)) return;
+  window.history.pushState(state, "", routeHashFromState(state));
+}
+
+function replaceAppState(reason = "") {
+  if (!window.history?.replaceState) return;
+  const state = getRouteState();
+  window.history.replaceState(state, "", routeHashFromState(state));
+}
+
+function showHomeView() {
+  currentView = "home";
+  activeTab = "points";
+  focusDrawerId = "";
+  focusDrawerEditing = false;
+  renderHome();
+  showView("homeView");
+}
+
 function showApp() {
   $("#studentGate").classList.add("hidden");
   $("#appShell").classList.remove("hidden");
@@ -1211,6 +1270,10 @@ function showApp() {
 }
 
 function showView(name) {
+  if (name === "homeView") currentView = "home";
+  if (name === "subjectView") currentView = "subject";
+  if (name === "adminLoginView") currentView = "adminLogin";
+  if (name === "adminView") currentView = "admin";
   ["homeView", "subjectView", "adminLoginView", "adminView"].forEach((id) => {
     $(`#${id}`).classList.toggle("hidden", id !== name);
   });
@@ -1228,6 +1291,7 @@ function render() {
   renderAdminLogin();
   renderAdmin();
   showView(session.admin ? "adminView" : "homeView");
+  replaceAppState("render");
 }
 
 function nextExamSubject() {
@@ -1285,11 +1349,14 @@ function getHomeDashboardStats() {
     known: 0,
     wrong: 0,
     favorite: 0,
+    notFavorite: 0,
     masteryPercent: 0,
     usedToday: 0,
     aiRemaining: AI_DAILY_LIMIT,
+    aiPaused: true,
   });
   stats.masteryPercent = stats.total > 0 ? Math.round((stats.known / stats.total) * 100) : 0;
+  stats.notFavorite = Math.max(0, stats.total - stats.favorite);
   const todayKey = today();
   const legacyTodayKey = `${session.user?.id || "guest"}-${todayKey}`;
   stats.usedToday = session.aiUsage?.[todayKey] ?? session.aiUsage?.[legacyTodayKey] ?? 0;
@@ -1298,19 +1365,15 @@ function getHomeDashboardStats() {
 }
 
 function getHomeAdviceText(stats) {
-  if (stats.reviewed === 0) {
-    return "今天建议先从最近考试的科目开始，优先看高重要度重点。";
+  if (stats.favorite > 0) {
+    return `你已收藏 ${stats.favorite} 个重点，考前可以优先回看这些不太稳的内容。`;
   }
 
-  if (stats.wrong > 0) {
-    return `你还有 ${stats.wrong} 个待复习重点，建议先处理不熟内容，再继续新重点。`;
+  if (stats.total > 0) {
+    return "今天建议先从最近考试的科目开始，遇到不记得的重点就点收藏。";
   }
 
-  if (stats.masteryPercent < 60) {
-    return "当前掌握度还不高，建议先完成未开始重点，再集中复习收藏内容。";
-  }
-
-  return "当前复习状态不错，建议继续推进未完成重点，并用 AI 生成下一步计划。";
+  return "当前暂无可复习重点，等资料补充后再开始复习。";
 }
 
 function renderRecoveryBanner() {
@@ -1347,17 +1410,16 @@ function renderHome() {
     </section>
 
     <section class="dashboard-metrics" aria-label="个人复习数据">
-      <div class="stat"><strong>${stats.reviewed}</strong><span>已做题目</span></div>
-      <div class="stat"><strong>${stats.wrong}</strong><span>待复习错题</span></div>
-      <div class="stat"><strong>${stats.masteryPercent}%</strong><span>当前掌握度</span></div>
-      <div class="stat"><strong>${stats.aiRemaining}</strong><span>今日剩余 AI</span></div>
+      <div class="stat"><strong>${stats.favorite}</strong><span>已收藏</span></div>
+      <div class="stat"><strong>${stats.total}</strong><span>总重点</span></div>
+      <div class="stat"><strong>${stats.notFavorite}</strong><span>未收藏</span></div>
+      <div class="stat"><strong>暂停</strong><span>AI 暂未开放</span></div>
     </section>
 
     <section class="today-plan">
-      <button type="button" data-action="home-open-important"><span>1</span><strong>重点</strong><p>复习未开始重点</p></button>
-      <button type="button" data-action="home-open-practice"><span>2</span><strong>练习</strong><p>继续未开始重点</p></button>
-      <button type="button" data-action="home-open-wrong"><span>3</span><strong>错题</strong><p>优先复习还不熟</p></button>
-      <button type="button" data-action="home-open-last-progress"><span>4</span><strong>最近进度</strong><p>${latestQuestion ? escapeHTML(`${getSubject(latest.subject_id)?.name || ""} · ${latestQuestion.question_content.slice(0, 28)}`) : "继续上次重点"}</p></button>
+      <button type="button" data-action="home-open-important"><span>1</span><strong>全部重点</strong><p>从最近考试科目开始</p></button>
+      <button type="button" data-action="home-open-favorite"><span>2</span><strong>已收藏</strong><p>集中复习不记得的题</p></button>
+      <button type="button" data-action="home-open-last-progress"><span>3</span><strong>最近进度</strong><p>${latestQuestion ? escapeHTML(`${getSubject(latest.subject_id)?.name || ""} · ${latestQuestion.question_content.slice(0, 28)}`) : "继续上次重点"}</p></button>
     </section>
 
     <section class="home-section">
@@ -1402,8 +1464,7 @@ function renderSubject() {
   const subject = getSubject(currentSubjectId) || data.subjects[0];
   if (!subject) return;
   currentSubjectId = subject.id;
-  if (activeTab !== "ai") activeTab = "points";
-  const visibleTab = activeTab;
+  activeTab = "points";
 
   $("#subjectView").innerHTML = `
     <div class="subject-workspace">
@@ -1416,14 +1477,11 @@ function renderSubject() {
       </section>
 
       <div class="core-tabs">
-        <button class="tab-button ${visibleTab === "points" ? "active" : ""}" data-action="set-tab" data-value="points">重点</button>
-        <button class="tab-button ${visibleTab === "ai" ? "active" : ""}" data-action="set-tab" data-value="ai">AI</button>
+        <button class="tab-button active" data-action="set-tab" data-value="points">重点</button>
       </div>
 
       <section class="content-panel">
-        ${visibleTab === "ai"
-          ? renderAiPanel(subject, "mobile")
-          : renderPoints(subject)}
+        ${renderPoints(subject)}
       </section>
     </div>
   `;
@@ -1473,19 +1531,13 @@ function questionProgress(questionId) {
 
 function focusQuestionMatchesStatus(question, filter = focusStatusFilter) {
   const progress = questionProgress(question.id);
-  if (filter === "not_started") return progress.status !== "reviewed";
-  if (filter === "known") return progress.mastery === "known";
-  if (filter === "unknown") return progress.status === "reviewed" && (progress.mastery === "unknown" || progress.isWrong === true);
   if (filter === "favorite") return progress.isFavorite === true;
   return true;
 }
 
 function focusEmptyText() {
   const map = {
-    not_started: "暂无未开始重点",
-    known: "暂无已掌握重点",
-    unknown: "暂无待复习重点",
-    favorite: "暂无收藏重点",
+    favorite: "暂无收藏重点。遇到不记得的题目，可以点收藏，考前集中复习。",
   };
   return map[focusStatusFilter] || "当前暂无重点内容";
 }
@@ -1502,6 +1554,7 @@ function recentProgressSubjectId() {
 function openSubjectFocus(subjectId, questionId = "", shouldOpenDetail = true) {
   const subject = getSubject(subjectId);
   if (!subject) return false;
+  if (!["all", "favorite"].includes(focusStatusFilter)) focusStatusFilter = "all";
   const questions = finalFocusQuestions(subject.id);
   if (!questions.length) return false;
   currentSubjectId = subject.id;
@@ -1521,6 +1574,15 @@ function openSubjectFocus(subjectId, questionId = "", shouldOpenDetail = true) {
   recordSubjectVisit(currentSubjectId);
   renderSubject();
   showView("subjectView");
+  if (shouldOpenDetail && focusDrawerId) {
+    const detailFocusId = focusDrawerId;
+    focusDrawerId = "";
+    pushAppState("open-subject-before-detail");
+    focusDrawerId = detailFocusId;
+    pushAppState("open-subject-focus-detail");
+  } else {
+    pushAppState("open-subject");
+  }
   return true;
 }
 
@@ -1539,12 +1601,14 @@ function continueStudy() {
 }
 
 function renderFinalFocus(subject) {
+  if (!["all", "favorite"].includes(focusStatusFilter)) focusStatusFilter = "all";
   const questions = focusVisibleQuestions();
+  const emptyTitle = focusStatusFilter === "favorite" ? "暂无收藏重点" : focusEmptyText();
+  const emptyCopy = focusStatusFilter === "favorite"
+    ? "遇到不记得的题目，可以点收藏，考前集中复习。"
+    : "可以切换筛选，或继续复习其他科目。";
   const filters = [
     ["all", "全部"],
-    ["not_started", "未开始"],
-    ["known", "已掌握"],
-    ["unknown", "还不熟"],
     ["favorite", "已收藏"],
   ];
   return `
@@ -1552,7 +1616,7 @@ function renderFinalFocus(subject) {
       ${filters.map(([value, label]) => `<button class="filter-chip ${focusStatusFilter === value ? "active" : ""}" data-action="focus-status-filter" data-value="${value}">${label}</button>`).join("")}
     </section>
     <div class="focus-question-list">
-      ${questions.length ? questions.map(renderFocusQuestionCard).join("") : `<div class="empty-state"><h3>${focusEmptyText()}</h3><p>可以切换筛选，或继续复习其他科目。</p></div>`}
+      ${questions.length ? questions.map(renderFocusQuestionCard).join("") : `<div class="empty-state"><h3>${emptyTitle}</h3><p>${emptyCopy}</p></div>`}
     </div>
     ${focusDrawerId ? renderFocusDrawer(focusDrawerId, focusDrawerEditing) : ""}
   `;
@@ -1561,18 +1625,6 @@ function renderFinalFocus(subject) {
 function renderFocusQuestionCard(question) {
   const missingSource = question.source_status !== "已有书本来源";
   const progress = questionProgress(question.id);
-  const statusLabel = progress.status === "not_started"
-    ? "未开始"
-    : progress.mastery === "known"
-      ? "已掌握"
-      : progress.mastery === "unknown" || progress.isWrong
-        ? "还不熟"
-        : "已复习";
-  const statusClass = progress.mastery === "known"
-    ? "mastered"
-    : progress.mastery === "unknown" || progress.isWrong
-      ? "unfamiliar"
-      : "";
   return `
     <article class="focus-question-card ${missingSource ? "needs-source" : ""}">
       <button class="focus-card-main" data-action="open-focus-detail" data-id="${question.id}" type="button">
@@ -1582,7 +1634,6 @@ function renderFocusQuestionCard(question) {
           <span class="pill-row">
             <span class="pill">${escapeHTML(question.question_type)}</span>
             <span class="source-status ${missingSource ? "missing" : "ready"}">${escapeHTML(question.source_status)}</span>
-            <span class="mastery-status ${statusClass}">${statusLabel}</span>
             ${question.memory_tip ? `<span class="pill memory-ready">有速记</span>` : ""}
             ${progress.isFavorite ? `<span class="pill">已收藏</span>` : ""}
           </span>
@@ -1613,18 +1664,6 @@ function renderFocusDrawer(questionId, editing) {
   const memoryTipText = question.memory_tip || "暂无速记，建议结合答案关键词自己整理口诀。";
   const missingSource = question.source_status !== "已有书本来源";
   const progress = questionProgress(question.id);
-  const statusLabel = progress.status === "not_started"
-    ? "未开始"
-    : progress.mastery === "known"
-      ? "已掌握"
-      : progress.mastery === "unknown" || progress.isWrong
-        ? "还不熟"
-        : "已复习";
-  const statusClass = progress.mastery === "known"
-    ? "mastered"
-    : progress.mastery === "unknown" || progress.isWrong
-      ? "unfamiliar"
-      : "";
   return `
     <div class="drawer-backdrop focus-backdrop focus-page-backdrop">
       <main class="question-drawer focus-drawer focus-detail-page" data-focus-detail-drawer>
@@ -1639,7 +1678,6 @@ function renderFocusDrawer(questionId, editing) {
               <div class="focus-detail-meta pill-row">
                 <span class="pill">${escapeHTML(question.question_type)}</span>
                 <span class="source-status ${missingSource ? "missing" : "ready"}">${escapeHTML(question.source_status)}</span>
-                <span class="mastery-status ${statusClass}">${statusLabel}</span>
                 ${progress.isFavorite ? `<span class="pill">已收藏</span>` : ""}
               </div>
             `}
@@ -1673,11 +1711,9 @@ function renderFocusDrawer(questionId, editing) {
               </section>
             ` : `<section><h3>书本来源</h3><p>${escapeHTML(question.source || "缺书本来源")}</p></section>`}
             <section class="focus-action-panel">
-              <h3>学习状态</h3>
+              <h3>收藏复习</h3>
               <div class="focus-action-buttons">
-                <button class="focus-action-button ${progress.mastery === "known" ? "active known" : ""}" data-action="focus-mark-known" data-id="${question.id}">我会了</button>
-                <button class="focus-action-button ${progress.mastery === "unknown" || progress.isWrong ? "active unknown" : ""}" data-action="focus-mark-unknown" data-id="${question.id}">还不熟</button>
-                <button class="focus-action-button ${progress.isFavorite ? "active favorite" : ""}" data-action="focus-toggle-favorite" data-id="${question.id}">${progress.isFavorite ? "已收藏" : "收藏"}</button>
+                <button class="focus-action-button ${progress.isFavorite ? "active favorite" : ""}" data-action="focus-toggle-favorite" data-id="${question.id}">${progress.isFavorite ? "已收藏" : "收藏这题"}</button>
               </div>
             </section>
             ${canEditFocus ? `<button class="primary-button" data-action="edit-focus-question" data-id="${question.id}">手动编辑</button>` : ""}
@@ -2804,6 +2840,7 @@ document.addEventListener("submit", async (event) => {
     saveData();
     saveSession();
     render();
+    pushAppState("recover-review");
     toast("学习进度已恢复");
     return;
   }
@@ -2817,6 +2854,7 @@ document.addEventListener("submit", async (event) => {
       saveSession();
       renderAdmin();
       showView("adminView");
+      pushAppState("admin-login-success");
       toast("已进入管理员后台");
     } else {
       $("#adminError").textContent = "账号或密码错误";
@@ -3068,6 +3106,7 @@ document.addEventListener("click", (event) => {
     }
     renderAdminLogin();
     showView("adminLoginView");
+    pushAppState("admin-login");
     return;
   }
 
@@ -3075,6 +3114,7 @@ document.addEventListener("click", (event) => {
     session = { user: null, admin: false, aiUsage: session.aiUsage || {}, recoveryAttempts: [] };
     saveSession();
     render();
+    replaceAppState("logout");
     return;
   }
 
@@ -3083,12 +3123,13 @@ document.addEventListener("click", (event) => {
       session = { user: null, admin: false, aiUsage: session.aiUsage || {}, recoveryAttempts: [] };
       saveSession();
       render();
+      replaceAppState("guest-home-logo");
       return;
     }
     session.admin = false;
     saveSession();
-    renderHome();
-    showView("homeView");
+    showHomeView();
+    pushAppState("home-logo");
     return;
   }
 
@@ -3127,14 +3168,14 @@ document.addEventListener("click", (event) => {
 
   if (action === "home-open-important" || action === "home-open-practice") {
     resetFocusState();
-    focusStatusFilter = "not_started";
+    focusStatusFilter = "all";
     const subject = nextExamSubject();
     if (!subject || !openSubjectFocus(subject.id, "", false)) toast("当前暂无可复习内容");
   }
 
-  if (action === "home-open-wrong") {
+  if (action === "home-open-favorite" || action === "home-open-wrong") {
     resetFocusState();
-    focusStatusFilter = "unknown";
+    focusStatusFilter = "favorite";
     const subject = nextExamSubject();
     if (!subject || !openSubjectFocus(subject.id, "", false)) toast("当前暂无可复习内容");
   }
@@ -3157,30 +3198,30 @@ document.addEventListener("click", (event) => {
     recordSubjectVisit(currentSubjectId);
     renderSubject();
     showView("subjectView");
+    pushAppState("open-subject");
   }
 
   if (action === "focus-status-filter") {
-    focusStatusFilter = button.dataset.value || "all";
+    focusStatusFilter = button.dataset.value === "favorite" ? "favorite" : "all";
     focusDrawerId = "";
     focusDrawerEditing = false;
     renderSubject();
+    pushAppState("focus-filter");
   }
 
   if (action === "back-home") {
-    if (session.user?.role === "guest") {
-      session = { user: null, admin: false, aiUsage: session.aiUsage || {}, recoveryAttempts: [] };
-      saveSession();
-      render();
-      return;
-    }
     session.admin = false;
     saveSession();
-    renderHome();
-    showView("homeView");
+    if (currentView !== "home" && window.history.length > 1) {
+      window.history.back();
+      return;
+    }
+    showHomeView();
+    replaceAppState("back-home");
   }
 
   if (action === "set-tab") {
-    activeTab = button.dataset.value === "ai" ? "ai" : "points";
+    activeTab = "points";
     practiceFocusId = "";
     renderSubject();
   }
@@ -3202,6 +3243,7 @@ document.addEventListener("click", (event) => {
     focusDrawerEditing = false;
     reviewProgressService()?.setCurrentQuestion(currentSubjectId, questionId);
     renderSubject();
+    pushAppState("open-focus-detail");
   }
 
   if (action === "focus-detail-prev" || action === "focus-detail-next") {
@@ -3209,20 +3251,21 @@ document.addEventListener("click", (event) => {
   }
 
   if (action === "focus-mark-known") {
-    const questionId = button.dataset.id;
-    if (questionId) reviewProgressService()?.markKnown(questionId, currentSubjectId);
-    renderSubject();
+    return;
   }
 
   if (action === "focus-mark-unknown") {
-    const questionId = button.dataset.id;
-    if (questionId) reviewProgressService()?.markUnknown(questionId, currentSubjectId);
-    renderSubject();
+    return;
   }
 
   if (action === "focus-toggle-favorite") {
     const questionId = button.dataset.id;
     if (questionId) reviewProgressService()?.toggleFavorite(questionId);
+    if (focusStatusFilter === "favorite" && questionId && !questionProgress(questionId).isFavorite) {
+      focusDrawerId = "";
+      focusDrawerEditing = false;
+      replaceAppState("favorite-removed");
+    }
     renderSubject();
   }
 
@@ -3233,9 +3276,14 @@ document.addEventListener("click", (event) => {
   }
 
   if (action === "close-focus-drawer") {
+    if (focusDrawerId && window.history.length > 1) {
+      window.history.back();
+      return;
+    }
     focusDrawerId = "";
     focusDrawerEditing = false;
     renderSubject();
+    pushAppState("close-focus-detail");
     requestAnimationFrame(() => window.scrollTo({ top: focusListScrollY, behavior: "auto" }));
   }
 
@@ -3348,30 +3396,8 @@ document.addEventListener("click", (event) => {
   }
 
   if (action === "quick-ai") {
-    activeTab = "ai";
-    const question = button.dataset.question;
-    if (getAiLeft() <= 0) {
-      toast("今日 AI 提问次数已用完，请明天再试");
-      return;
-    }
-    const result = answerAi(question);
-    useAiOnce();
-    session.lastAiAnswer = result.text;
-    data.ai_qa_logs.unshift({
-      id: uid("log"),
-      user_id: session.user.id,
-      subject_id: currentSubjectId,
-      question,
-      answer: result.text,
-      cited_key_point_ids: result.cited,
-      cited_question_ids: result.citedQuestions || [],
-      is_knowledge_hit: result.hit,
-      token_usage: Math.max(120, result.text.length),
-      created_at: nowText(),
-    });
-    saveData();
-    saveSession();
-    renderSubject();
+    toast("AI 暂未开放，后续会优先用于计算题。");
+    return;
   }
 
   if (action === "fill-ai-draft") {
@@ -3384,6 +3410,7 @@ document.addEventListener("click", (event) => {
     delete session.pendingRecoveryCode;
     saveSession();
     renderHome();
+    replaceAppState("dismiss-recovery-code");
   }
 
   if (action === "admin-page") {
@@ -3397,12 +3424,13 @@ document.addEventListener("click", (event) => {
       session = { user: null, admin: false, aiUsage: session.aiUsage || {}, recoveryAttempts: [] };
       saveSession();
       render();
+      replaceAppState("admin-guest-logout");
       return;
     }
     session.admin = false;
     saveSession();
-    renderHome();
-    showView("homeView");
+    showHomeView();
+    pushAppState("admin-logout");
   }
 
   if (action === "toggle-subject") {
@@ -3661,6 +3689,46 @@ function setupFocusDetailSwipe() {
     moveFocusDetail(deltaX < 0 ? 1 : -1);
   }, { passive: true });
 }
+
+window.addEventListener("popstate", (event) => {
+  if (!session.user) return;
+  const state = event.state || { view: "home", filter: "all" };
+  isApplyingHistoryState = true;
+  currentView = state.view || "home";
+  activeTab = "points";
+  focusStatusFilter = normalizedFocusFilter(state.filter);
+  focusDrawerEditing = false;
+
+  if (currentView === "subject") {
+    currentSubjectId = state.subjectId && getSubject(state.subjectId)
+      ? state.subjectId
+      : session.currentSubjectId && getSubject(session.currentSubjectId)
+        ? session.currentSubjectId
+        : currentSubjectId;
+    session.currentSubjectId = currentSubjectId;
+    saveSession();
+    focusDrawerId = state.focusId && finalFocusQuestions(currentSubjectId).some((question) => question.id === state.focusId)
+      ? state.focusId
+      : "";
+    renderSubject();
+    showView("subjectView");
+    requestAnimationFrame(() => {
+      if (!focusDrawerId) window.scrollTo({ top: focusListScrollY, behavior: "auto" });
+    });
+  } else if (currentView === "admin" && isAdminUser()) {
+    focusDrawerId = "";
+    renderAdmin();
+    showView("adminView");
+  } else if (currentView === "adminLogin") {
+    focusDrawerId = "";
+    renderAdminLogin();
+    showView("adminLoginView");
+  } else {
+    showHomeView();
+  }
+
+  isApplyingHistoryState = false;
+});
 
 document.addEventListener("keydown", (event) => {
   if (activeTab !== "points" || !finalFocusQuestions(currentSubjectId).length) return;
