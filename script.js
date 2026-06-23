@@ -782,6 +782,23 @@ function saveSession() {
   dataService.set(SESSION_KEY, JSON.stringify(session));
 }
 
+function isAdminUser() {
+  return Boolean(
+    session &&
+      (
+        session.admin === true ||
+        session.isAdmin === true ||
+        session.user?.role === "admin"
+      )
+  );
+}
+
+function requireAdmin() {
+  if (isAdminUser()) return true;
+  toast("你当前是游客模式，不能修改题库内容。");
+  return false;
+}
+
 function uid(prefix) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
 }
@@ -1576,6 +1593,8 @@ function renderFocusQuestionCard(question) {
 function renderFocusDrawer(questionId, editing) {
   const question = data.questions.find((item) => item.id === questionId && item.is_final_focus);
   if (!question) return "";
+  const canEditFocus = isAdminUser();
+  const shouldShowEditor = editing && canEditFocus;
   const visibleQuestions = focusVisibleQuestions();
   const currentIndex = visibleQuestions.findIndex((item) => item.id === question.id);
   const hasPrevious = currentIndex > 0;
@@ -1609,9 +1628,9 @@ function renderFocusDrawer(questionId, editing) {
       <main class="question-drawer focus-drawer focus-detail-page" data-focus-detail-drawer>
         <div class="drawer-head focus-drawer-head">
           <button class="focus-close-icon" data-action="close-focus-drawer" aria-label="返回重点列表">← 返回</button>
-          <div><p class="eyebrow">${progressText} · 题号 ${question.order}</p><h2>${editing ? "编辑重点题目" : escapeHTML(question.title)}</h2></div>
+          <div><p class="eyebrow">${progressText} · 题号 ${question.order}</p><h2>${shouldShowEditor ? "编辑重点题目" : escapeHTML(question.title)}</h2></div>
         </div>
-        ${editing ? `
+        ${shouldShowEditor ? `
           <form class="admin-form drawer-form" data-form="focus-question-edit" data-question-id="${question.id}">
             <label>题目序号<input name="order" type="number" min="1" value="${question.order}" /></label>
             <label>题型<select name="question_type">${QUESTION_TYPES.map((type) => `<option value="${type}" ${question.question_type === type ? "selected" : ""}>${type}</option>`).join("")}</select></label>
@@ -1652,7 +1671,7 @@ function renderFocusDrawer(questionId, editing) {
                 <button class="focus-action-button ${progress.isFavorite ? "active favorite" : ""}" data-action="focus-toggle-favorite" data-id="${question.id}">${progress.isFavorite ? "已收藏" : "收藏"}</button>
               </div>
             </section>
-            <button class="primary-button" data-action="edit-focus-question" data-id="${question.id}">手动编辑</button>
+            ${canEditFocus ? `<button class="primary-button" data-action="edit-focus-question" data-id="${question.id}">手动编辑</button>` : ""}
             <nav class="focus-detail-footer" aria-label="重点切换">
               <button class="small-button" data-action="focus-detail-prev" ${hasPrevious ? "" : "disabled"}>← 上一条</button>
               <span>${currentIndex >= 0 ? `${currentIndex + 1} / ${visibleQuestions.length}` : `题号 ${question.order}`}</span>
@@ -2160,6 +2179,11 @@ function renderAdminLogin() {
 }
 
 function renderAdmin() {
+  if (!isAdminUser()) {
+    renderAdminLogin();
+    showView("adminLoginView");
+    return;
+  }
   const nav = [
     ["dashboard", "后台首页"],
     ["subjects", "科目管理"],
@@ -2793,6 +2817,14 @@ document.addEventListener("submit", async (event) => {
   const formType = target.dataset.form;
   if (!formType) return;
   event.preventDefault();
+  const adminOnlyForms = new Set([
+    "admin-subject",
+    "admin-point",
+    "focus-question-edit",
+    "admin-question-library",
+    "admin-question-bulk",
+  ]);
+  if (adminOnlyForms.has(formType) && !requireAdmin()) return;
   const form = new FormData(target);
 
   if (formType === "ai") {
@@ -3058,6 +3090,26 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  const adminOnlyActions = new Set([
+    "edit-focus-question",
+    "admin-page",
+    "toggle-subject",
+    "save-exam-info",
+    "delete-subject",
+    "toggle-point-public",
+    "save-point-info",
+    "delete-point",
+    "new-question",
+    "edit-question",
+    "publish-question",
+    "hide-question",
+    "archive-question",
+    "bulk-publish-questions",
+    "bulk-hide-questions",
+    "delete-comment",
+  ]);
+  if (adminOnlyActions.has(action) && !requireAdmin()) return;
+
   if (action === "start-review" || action === "start-today-review") {
     resetFocusState();
     continueStudy();
@@ -3124,6 +3176,7 @@ document.addEventListener("click", (event) => {
   }
 
   if (action === "quick-master-focus") {
+    if (!requireAdmin()) return;
     const question = data.questions.find((item) => item.id === button.dataset.id && item.is_final_focus);
     if (!question) return;
     question.mastery_status = question.mastery_status === "已掌握" ? "复习中" : "已掌握";
@@ -3260,6 +3313,7 @@ document.addEventListener("click", (event) => {
   }
 
   if (action === "mark-wrong-mastered") {
+    if (!requireAdmin()) return;
     const record = data.wrong_questions.find((item) => item.id === button.dataset.id && item.student_id === currentStudentId());
     if (!record) return;
     record.mastery_status = record.mastery_status === "已掌握" ? "复习中" : "已掌握";
