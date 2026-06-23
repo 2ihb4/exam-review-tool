@@ -473,6 +473,7 @@ function migrateData(current) {
         source: seed.source,
         source_status: complete ? "已有书本来源" : "待补拍",
         tags: seed.tags,
+        memory_tip: seed.memory_tip || seed.mnemonic || seed.tip || "",
         mastery_status: "未开始",
         note: complete ? "答案和来源已从 Word 复习资料导入。" : "资料待补充，不得自动生成答案。",
         difficulty: "medium",
@@ -513,6 +514,7 @@ function migrateData(current) {
       source: projectManagerDutySeed.source,
       source_status: complete ? "已有书本来源" : "待补拍",
       tags: projectManagerDutySeed.tags,
+      memory_tip: projectManagerDutySeed.memory_tip || projectManagerDutySeed.mnemonic || projectManagerDutySeed.tip || "",
       mastery_status: "未开始",
       note: complete ? "答案和来源已从 Word 复习资料导入。" : "资料待补充，不得自动生成答案。",
       difficulty: "medium",
@@ -544,6 +546,15 @@ function migrateData(current) {
     completionAcceptanceQuestion.updated_at = today();
     current.__needsSave = true;
   }
+  engineeringQuestionSeed.forEach((seed) => {
+    const memoryTip = seed.memory_tip || seed.mnemonic || seed.tip || "";
+    if (!memoryTip) return;
+    const question = current.questions.find((item) => item.id === seed.id && item.subject_id === "s-management");
+    if (!question || question.memory_tip === memoryTip) return;
+    question.memory_tip = memoryTip;
+    question.updated_at = today();
+    current.__needsSave = true;
+  });
   const networkTimeQuestions = current.questions.filter((question) =>
     question.id === "final-focus-07" || question.title === "网络计划六个时间参数的概念是什么？"
   );
@@ -811,6 +822,37 @@ async function createAnonymousStudent(nickname) {
   saveData();
   saveSession();
   return user;
+}
+
+async function startAnonymousReview() {
+  try {
+    const nicknameInput = document.querySelector("[data-nickname-input]") || $("#nicknameInput");
+    const nickname = nicknameInput ? nicknameInput.value.trim() : "";
+    try {
+      await createAnonymousStudent(nickname);
+    } catch (createError) {
+      console.error("Failed to create student recovery profile, using guest session", createError);
+      session.user = {
+        id: uid("anonymous"),
+        nickname: nickname || "匿名同学",
+        role: "guest",
+        status: "active",
+        created_at: today(),
+        updated_at: today(),
+      };
+      session.admin = false;
+      session.isAnonymous = true;
+      session.aiUsage = session.aiUsage || {};
+      session.recoveryAttempts = session.recoveryAttempts || [];
+      saveSession();
+    }
+    render();
+  } catch (error) {
+    console.error("Failed to enter anonymous review", error);
+    const errorNode = $("#entryError");
+    if (errorNode) errorNode.textContent = "进入失败，请刷新后重试。";
+    toast("进入失败，请刷新后重试。");
+  }
 }
 
 function currentStudentId() {
@@ -1542,7 +1584,11 @@ function renderFocusDrawer(questionId, editing) {
     ? `期末重点 ${currentIndex + 1} / ${visibleQuestions.length}`
     : `期末重点 · 题号 ${question.order}`;
   const subject = getSubject(question.subject_id);
-  const isSafetyEnvironment = question.subject_id === "s-marketing" || subject?.name === "工程安全与环境保护";
+  const usesMemoryTip =
+    question.subject_id === "s-management" ||
+    question.subject_id === "s-marketing" ||
+    subject?.name === "工程项目管理" ||
+    subject?.name === "工程安全与环境保护";
   const memoryTipText = question.memory_tip || "暂无速记，建议结合答案关键词自己整理口诀。";
   const missingSource = question.source_status !== "已有书本来源";
   const progress = questionProgress(question.id);
@@ -1590,7 +1636,7 @@ function renderFocusDrawer(questionId, editing) {
             </div>
             ${missingSource ? `<div class="source-warning"><strong>该题缺少书本来源，暂不作答</strong><span>请补充书本图片或可靠页码后，再手动录入答案。</span></div>` : ""}
             <section><h3>答案</h3>${question.correct_answer ? `<p>${escapeHTML(question.correct_answer)}</p>` : `<p class="empty-answer">答案待补充，不可根据常识自动生成</p>`}</section>
-            ${isSafetyEnvironment ? `
+            ${usesMemoryTip ? `
               <section class="memory-tip-section">
                 <div class="memory-tip-card">
                   <h3 class="memory-tip-title">速记</h3>
@@ -2691,9 +2737,7 @@ document.addEventListener("submit", async (event) => {
   const target = event.target;
   if (target.id === "anonymousEntryForm") {
     event.preventDefault();
-    const nickname = $("#nicknameInput").value.trim();
-    await createAnonymousStudent(nickname);
-    render();
+    await startAnonymousReview();
     return;
   }
 
@@ -3007,6 +3051,12 @@ document.addEventListener("click", (event) => {
   }
 
   if (!action) return;
+
+  if (action === "start-anonymous-review") {
+    event.preventDefault();
+    startAnonymousReview();
+    return;
+  }
 
   if (action === "start-review" || action === "start-today-review") {
     resetFocusState();
