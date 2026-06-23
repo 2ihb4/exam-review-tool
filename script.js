@@ -299,6 +299,7 @@ let focusReviewIndex = 0;
 let focusListScrollY = 0;
 let focusDetailTouchStartX = 0;
 let focusDetailTouchStartY = 0;
+let focusDetailTouchStartTime = 0;
 let adminQuestionFilters = {
   subject_id: "all",
   is_final_focus: "all",
@@ -1426,6 +1427,7 @@ function renderSubject() {
       </section>
     </div>
   `;
+  if (focusDrawerId) requestAnimationFrame(setupFocusDetailSwipe);
 }
 
 function renderPoints(subject) {
@@ -1627,8 +1629,21 @@ function renderFocusDrawer(questionId, editing) {
     <div class="drawer-backdrop focus-backdrop focus-page-backdrop">
       <main class="question-drawer focus-drawer focus-detail-page" data-focus-detail-drawer>
         <div class="drawer-head focus-drawer-head">
-          <button class="focus-close-icon" data-action="close-focus-drawer" aria-label="返回重点列表">← 返回</button>
-          <div><p class="eyebrow">${progressText} · 题号 ${question.order}</p><h2>${shouldShowEditor ? "编辑重点题目" : escapeHTML(question.title)}</h2></div>
+          <div class="focus-detail-topbar">
+            <button class="focus-close-icon" data-action="close-focus-drawer" aria-label="返回重点列表" type="button">← 返回</button>
+          </div>
+          <div class="focus-detail-title-block">
+            <p class="eyebrow">${progressText} · 题号 ${question.order}</p>
+            <h2>${shouldShowEditor ? "编辑重点题目" : escapeHTML(question.title)}</h2>
+            ${shouldShowEditor ? "" : `
+              <div class="focus-detail-meta pill-row">
+                <span class="pill">${escapeHTML(question.question_type)}</span>
+                <span class="source-status ${missingSource ? "missing" : "ready"}">${escapeHTML(question.source_status)}</span>
+                <span class="mastery-status ${statusClass}">${statusLabel}</span>
+                ${progress.isFavorite ? `<span class="pill">已收藏</span>` : ""}
+              </div>
+            `}
+          </div>
         </div>
         ${shouldShowEditor ? `
           <form class="admin-form drawer-form" data-form="focus-question-edit" data-question-id="${question.id}">
@@ -1647,12 +1662,6 @@ function renderFocusDrawer(questionId, editing) {
           </form>
         ` : `
           <div class="focus-detail-body">
-            <div class="focus-detail-meta">
-              <span class="pill">${escapeHTML(question.question_type)}</span>
-              <span class="source-status ${missingSource ? "missing" : "ready"}">${escapeHTML(question.source_status)}</span>
-              <span class="mastery-status ${statusClass}">${statusLabel}</span>
-              ${progress.isFavorite ? `<span class="pill">已收藏</span>` : ""}
-            </div>
             ${missingSource ? `<div class="source-warning"><strong>该题缺少书本来源，暂不作答</strong><span>请补充书本图片或可靠页码后，再手动录入答案。</span></div>` : ""}
             <section><h3>答案</h3>${question.correct_answer ? `<p>${escapeHTML(question.correct_answer)}</p>` : `<p class="empty-answer">答案待补充，不可根据常识自动生成</p>`}</section>
             ${usesMemoryTip ? `
@@ -1672,6 +1681,7 @@ function renderFocusDrawer(questionId, editing) {
               </div>
             </section>
             ${canEditFocus ? `<button class="primary-button" data-action="edit-focus-question" data-id="${question.id}">手动编辑</button>` : ""}
+            <p class="focus-swipe-hint">左右滑动切换知识卡</p>
             <nav class="focus-detail-footer" aria-label="重点切换">
               <button class="small-button" data-action="focus-detail-prev" ${hasPrevious ? "" : "disabled"}>← 上一条</button>
               <span>${currentIndex >= 0 ? `${currentIndex + 1} / ${visibleQuestions.length}` : `题号 ${question.order}`}</span>
@@ -3605,8 +3615,51 @@ function moveFocusDetail(delta) {
   reviewProgressService()?.setCurrentQuestion(currentSubjectId, focusDrawerId);
   renderSubject();
   requestAnimationFrame(() => {
-    document.querySelector("[data-focus-detail-drawer]")?.scrollTo({ top: 0, behavior: "smooth" });
+    const detailDrawer = document.querySelector("[data-focus-detail-drawer]");
+    detailDrawer?.scrollTo({ top: 0, behavior: "smooth" });
+    detailDrawer?.closest(".focus-page-backdrop")?.scrollTo({ top: 0, behavior: "smooth" });
   });
+}
+
+function isFocusSwipeBlockedTarget(target) {
+  const element = target instanceof Element ? target : null;
+  if (!element) return false;
+  const tagName = element.tagName?.toLowerCase();
+  return ["input", "textarea", "select"].includes(tagName) || element.isContentEditable;
+}
+
+function setupFocusDetailSwipe() {
+  const drawer = document.querySelector("[data-focus-detail-drawer]");
+  if (!drawer || drawer.dataset.swipeReady === "true") return;
+  drawer.dataset.swipeReady = "true";
+  drawer.addEventListener("touchstart", (event) => {
+    focusDetailTouchStartX = 0;
+    focusDetailTouchStartY = 0;
+    focusDetailTouchStartTime = 0;
+    if (focusDrawerEditing || isFocusSwipeBlockedTarget(event.target)) return;
+    const touch = event.touches[0];
+    if (!touch) return;
+    focusDetailTouchStartX = touch.clientX;
+    focusDetailTouchStartY = touch.clientY;
+    focusDetailTouchStartTime = Date.now();
+  }, { passive: true });
+
+  drawer.addEventListener("touchend", (event) => {
+    if (focusDrawerEditing || isFocusSwipeBlockedTarget(event.target)) return;
+    if (!focusDetailTouchStartTime) return;
+    const touch = event.changedTouches[0];
+    if (!touch) return;
+    const deltaX = touch.clientX - focusDetailTouchStartX;
+    const deltaY = touch.clientY - focusDetailTouchStartY;
+    const elapsed = Date.now() - focusDetailTouchStartTime;
+    focusDetailTouchStartX = 0;
+    focusDetailTouchStartY = 0;
+    focusDetailTouchStartTime = 0;
+    if (elapsed > 800) return;
+    if (Math.abs(deltaX) < 70) return;
+    if (Math.abs(deltaX) < Math.abs(deltaY) * 1.4) return;
+    moveFocusDetail(deltaX < 0 ? 1 : -1);
+  }, { passive: true });
 }
 
 document.addEventListener("keydown", (event) => {
@@ -3622,22 +3675,6 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "ArrowRight") moveFocusReview(1);
   if (event.key === "ArrowLeft") moveFocusReview(-1);
 });
-
-document.addEventListener("touchstart", (event) => {
-  if (!focusDrawerId || focusDrawerEditing || !event.target.closest("[data-focus-detail-drawer]")) return;
-  const touch = event.changedTouches[0];
-  focusDetailTouchStartX = touch.clientX;
-  focusDetailTouchStartY = touch.clientY;
-}, { passive: true });
-
-document.addEventListener("touchend", (event) => {
-  if (!focusDrawerId || focusDrawerEditing || !event.target.closest("[data-focus-detail-drawer]")) return;
-  const touch = event.changedTouches[0];
-  const deltaX = touch.clientX - focusDetailTouchStartX;
-  const deltaY = touch.clientY - focusDetailTouchStartY;
-  if (Math.abs(deltaX) < 55 || Math.abs(deltaX) <= Math.abs(deltaY) * 1.2) return;
-  moveFocusDetail(deltaX < 0 ? 1 : -1);
-}, { passive: true });
 
 function deleteCommentTree(commentId) {
   data.comments.forEach((comment) => {
