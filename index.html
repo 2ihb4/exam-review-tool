@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>期末复习助手 · 匿名复习版</title>
+    <link rel="stylesheet" href="./styles.css?v=20260623-memory-tip-1" />
+  </head>
+  <body>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <main id="studentGate" class="gate-view">
+      <section class="gate-panel">
+        <p class="eyebrow">Final Review Workspace</p>
+        <h1>期末复习助手</h1>
+        <p class="lead">匿名进入，持续保存你的练习、错题和复习进度。</p>
+        <form id="anonymousEntryForm" class="gate-form">
+          <label>
+            昵称（选填）
+            <input id="nicknameInput" type="text" maxlength="20" placeholder="不填写将使用匿名同学" autocomplete="nickname" />
+          </label>
+          <p class="privacy-note">不收集真实姓名、学号、手机号、邮箱或班级。</p>
+          <p id="entryError" class="form-error"></p>
+          <button type="submit" class="primary-button full-button">开始复习</button>
+        </form>
+        <details class="recovery-entry">
+          <summary>已有进度恢复码</summary>
+          <form id="recoveryForm" class="gate-form compact-form">
+            <label>进度恢复码<input id="recoveryCodeInput" maxlength="12" placeholder="输入 8-10 位恢复码" autocomplete="off" /></label>
+            <p id="recoveryError" class="form-error"></p>
+            <button type="submit" class="ghost-button full-button">恢复学习进度</button>
+          </form>
+        </details>
+        <button id="openAdminLogin" class="text-button">管理员入口</button>
+      </section>
+    </main>
+
+    <div id="appShell" class="app-shell hidden">
+      <header class="topbar">
+        <button id="homeLogo" class="brand-button" type="button">
+          <span class="brand-mark">期</span>
+          <span>期末复习助手</span>
+        </button>
+        <nav class="top-actions">
+          <button id="goAdminFromHome" class="nav-link" type="button">管理</button>
+          <span id="studentName" class="user-status"></span>
+          <button id="logoutStudent" class="logout-link" type="button">退出</button>
+        </nav>
+      </header>
+
+      <section id="homeView" class="view"></section>
+      <section id="subjectView" class="view hidden"></section>
+      <section id="adminLoginView" class="view hidden"></section>
+      <section id="adminView" class="view hidden"></section>
+    </div>
+
+    <script src="./data-service.js"></script>
+    <script src="./progress-service.js?v=20260623-progress-1"></script>
+    <script src="./engineering-question-seed.js"></script>
+    <script src="./safety-environment-focus-seed.js?v=20260623-memory-tip-1"></script>
+    <script src="./script.js?v=20260623-memory-tip-1"></script>
+  </body>
+</html>
