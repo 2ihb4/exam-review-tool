@@ -558,6 +558,8 @@ function migrateData(current) {
     question.updated_at = today();
     current.__needsSave = true;
   });
+  syncEngineeringFocusQuestions(current, engineeringQuestionSeed);
+  syncProjectCalculationQuestions(current, window.CALC_EXAMPLE_QUESTIONS || []);
   const networkTimeQuestions = current.questions.filter((question) =>
     question.id === "final-focus-07" || question.title === "网络计划六个时间参数的概念是什么？"
   );
@@ -686,6 +688,120 @@ function migrateData(current) {
   return current;
 }
 
+function syncEngineeringFocusQuestions(current, seeds = []) {
+  const syncOrders = new Set([5, 11, 12]);
+  const syncedIds = new Set();
+  seeds
+    .filter((seed) => syncOrders.has(seed.order))
+    .forEach((seed) => {
+      const complete = !seed.incomplete && Boolean(seed.correct_answer);
+      const imported = normalizeQuestion({
+        id: seed.id || `final-focus-${String(seed.order).padStart(2, "0")}`,
+        subject_id: "s-management",
+        chapter: "期末重点",
+        key_point_ids: [],
+        question_type: seed.question_type,
+        question_content: seed.title,
+        title: seed.title,
+        order: seed.order,
+        options: [],
+        correct_answer: seed.correct_answer,
+        explanation: "",
+        source: seed.source,
+        source_status: seed.source_status || (complete ? "已有书本来源" : "待补拍"),
+        tags: seed.tags,
+        memory_tip: seed.memory_tip || seed.mnemonic || seed.tip || "",
+        mastery_status: "未开始",
+        note: complete ? "答案和来源已从工程项目管理四问整理导入。" : "资料待补充，不得自动生成答案。",
+        difficulty: "medium",
+        importance: "high",
+        prediction_level: "high",
+        is_final_focus: true,
+        is_prediction: complete,
+        is_self_test: false,
+        is_ai_knowledge: complete,
+        is_public: complete,
+        status: complete ? "published" : "pending_review",
+        created_by: "u-admin",
+        created_at: today(),
+        updated_at: today(),
+      });
+      const existing = current.questions.find((question) =>
+        question.subject_id === "s-management" &&
+        (question.id === imported.id || question.order === imported.order || question.title === imported.title)
+      );
+      if (existing) {
+        const keepMasteryStatus = existing.mastery_status || imported.mastery_status;
+        const keepCreatedAt = existing.created_at || imported.created_at;
+        Object.assign(existing, imported, {
+          id: existing.id || imported.id,
+          mastery_status: keepMasteryStatus,
+          created_at: keepCreatedAt,
+        });
+        syncedIds.add(existing.id);
+      } else {
+        current.questions.push(imported);
+        syncedIds.add(imported.id);
+      }
+      current.__needsSave = true;
+    });
+
+  current.questions.forEach((question) => {
+    if (question.subject_id !== "s-management" || syncedIds.has(question.id)) return;
+    if (question.title === "简述工程项目成本超支原因。") {
+      question.is_public = false;
+      question.status = "archived";
+      question.updated_at = today();
+      current.__needsSave = true;
+    }
+  });
+}
+
+function syncProjectCalculationQuestions(current, calcQuestions = []) {
+  calcQuestions.forEach((seed) => {
+    if (!seed?.id) return;
+    const imported = normalizeQuestion({
+      ...seed,
+      subject_id: "s-management",
+      chapter: "期末重点",
+      question_content: seed.problem_text || seed.questionText || seed.title,
+      correct_answer: seed.standard_answer || seed.correct_answer || "",
+      source: seed.source || "工程项目管理计算题 PDF",
+      source_status: "已有书本来源",
+      memory_tip: seed.solution_idea || "",
+      mastery_status: "未开始",
+      difficulty: "medium",
+      importance: "high",
+      prediction_level: "high",
+      is_final_focus: true,
+      is_prediction: false,
+      is_self_test: true,
+      is_ai_knowledge: true,
+      is_public: true,
+      status: "published",
+      created_by: "u-admin",
+      created_at: today(),
+      updated_at: today(),
+    });
+    const existing = current.questions.find((question) =>
+      question.subject_id === "s-management" &&
+      (question.id === imported.id || (question.order === imported.order && question.question_type === "计算题"))
+    );
+    if (existing) {
+      const keepMasteryStatus = existing.mastery_status || imported.mastery_status;
+      const keepCreatedAt = existing.created_at || imported.created_at;
+      Object.assign(existing, imported, {
+        id: existing.id || imported.id,
+        mastery_status: keepMasteryStatus,
+        created_at: keepCreatedAt,
+      });
+    } else {
+      current.questions.push(imported);
+    }
+    current.__needsSave = true;
+  });
+}
+
 function migrateQuestions(current) {
   const existing = Array.isArray(current.questions) ? current.questions : [];
   const normalized = existing.map(normalizeQuestion);
@@ -739,6 +855,22 @@ function normalizeQuestion(question) {
     memory_tip: question.memory_tip || question.mnemonic || question.tip || "",
     mastery_status: question.mastery_status || "未开始",
     note: question.note || "",
+    is_calculation: question.is_calculation === true || String(question.question_type || "").includes("计算题"),
+    calculation_type: question.calculation_type || "",
+    problem_text: question.problem_text || question.questionText || question.question_content || question.title || "",
+    formula: question.formula || "",
+    formulaHtml: question.formulaHtml || "",
+    images: Array.isArray(question.images) ? question.images : question.image ? [question.image] : [],
+    answer_images: Array.isArray(question.answer_images) ? question.answer_images : question.answer_image ? [question.answer_image] : [],
+    source_images: Array.isArray(question.source_images) ? question.source_images : Array.isArray(question.sourceImages) ? question.sourceImages : [],
+    standard_steps: Array.isArray(question.standard_steps) ? question.standard_steps : Array.isArray(question.standardSteps) ? question.standardSteps : [],
+    standard_answer: question.standard_answer || "",
+    solution_idea: question.solution_idea || "",
+    common_mistakes: Array.isArray(question.common_mistakes) ? question.common_mistakes : Array.isArray(question.commonMistakes) ? question.commonMistakes : [],
+    relations: Array.isArray(question.relations) ? question.relations : [],
+    works: Array.isArray(question.works) ? question.works : Array.isArray(question.realWorks) ? question.realWorks : [],
+    virtual_works: Array.isArray(question.virtual_works) ? question.virtual_works : Array.isArray(question.dummyWorks) ? question.dummyWorks : [],
+    known_conditions: Array.isArray(question.known_conditions) ? question.known_conditions : [],
     is_final_focus: question.is_final_focus === true,
     difficulty: question.difficulty || "medium",
     importance: question.importance || "medium",
@@ -1277,6 +1409,8 @@ function showView(name) {
   ["homeView", "subjectView", "adminLoginView", "adminView"].forEach((id) => {
     $(`#${id}`).classList.toggle("hidden", id !== name);
   });
+  if (name !== "subjectView") clearCalcAiModule();
+  if (name === "subjectView") renderCalcAiForCurrentSubject();
 }
 
 function render() {
@@ -1482,10 +1616,28 @@ function renderSubject() {
 
       <section class="content-panel">
         ${renderPoints(subject)}
+        ${isProjectManagementSubject(subject) ? `<div data-calc-ai-root></div>` : ""}
       </section>
     </div>
   `;
+  if (currentView === "subject") renderCalcAiForCurrentSubject();
   if (focusDrawerId) requestAnimationFrame(setupFocusDetailSwipe);
+}
+
+function isProjectManagementSubject(subject) {
+  return Boolean(subject && (subject.id === "s-management" || subject.name === "工程项目管理"));
+}
+
+function renderCalcAiForCurrentSubject() {
+  const subject = getSubject(currentSubjectId);
+  if (!isProjectManagementSubject(subject)) return;
+  window.CalcAiAssistant?.render?.();
+}
+
+function clearCalcAiModule() {
+  document.querySelectorAll("[data-calc-ai-root]").forEach((root) => {
+    root.innerHTML = "";
+  });
 }
 
 function renderPoints(subject) {
@@ -1643,6 +1795,156 @@ function renderFocusQuestionCard(question) {
   `;
 }
 
+function uniqueImageList(...groups) {
+  const result = [];
+  groups.flat().filter(Boolean).forEach((src) => {
+    if (!result.includes(src)) result.push(src);
+  });
+  return result;
+}
+
+function isCalculationQuestion(question) {
+  return Boolean(question && (question.is_calculation === true || String(question.question_type || "").includes("计算题")));
+}
+
+function calculationSourceImages(question) {
+  if (Array.isArray(question.source_images) && question.source_images.length) {
+    return uniqueImageList(question.source_images);
+  }
+  return uniqueImageList(
+    question.image,
+    question.images,
+    question.answer_image,
+    question.answer_images
+  );
+}
+
+function renderFocusArray(items, ordered = false) {
+  if (!Array.isArray(items)) return items ? `<p>${escapeHTML(items)}</p>` : `<p>暂无内容</p>`;
+  if (!items.length) return `<p>暂无内容</p>`;
+  const tag = ordered ? "ol" : "ul";
+  return `<${tag}>${items.map((item) => `<li>${escapeHTML(item)}</li>`).join("")}</${tag}>`;
+}
+
+function renderCalculationSourceImages(question) {
+  const images = calculationSourceImages(question);
+  if (!images.length) return "";
+  return `
+    <section class="calc-source-image-section">
+      <h3>题目与答案原图</h3>
+      <div class="calc-source-image-grid">
+        ${images.map((src, index) => `
+          <figure class="calc-source-image-card">
+            <a href="${escapeHTML(src)}" target="_blank" rel="noopener">
+              <img src="${escapeHTML(src)}" alt="${escapeHTML(`${question.title} 题目与答案原图${images.length > 1 ? ` ${index + 1}` : ""}`)}" loading="lazy" />
+            </a>
+            <figcaption class="calc-source-image-note">原图仅供学生查看，AI 不读取图片，也不识别图片内容。</figcaption>
+          </figure>
+        `).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderCalculationFocusDetail(question) {
+  const steps = Array.isArray(question.standard_steps) ? question.standard_steps : [];
+  const standardAnswer = question.standard_answer || question.correct_answer || "";
+  const solutionIdea = question.solution_idea || "先识别计算题类型，再按公式、步骤和核对结果的顺序完成作答。";
+  const mistakes = Array.isArray(question.common_mistakes) ? question.common_mistakes : [];
+
+  return `
+    <section class="calc-ai-result-section">
+      <h3>题目</h3>
+      <p class="calc-ai-question-text">${escapeHTML(question.problem_text || question.question_content || question.title)}</p>
+    </section>
+    ${question.formula ? `
+      <section class="calc-ai-result-section">
+        <h3>公式</h3>
+        <p class="calc-ai-formula">${escapeHTML(question.formula)}</p>
+      </section>
+    ` : ""}
+    ${renderCalculationSourceImages(question)}
+    <section class="calc-standard-answer">
+      <h3>标准答案 / 解题步骤</h3>
+      ${steps.length ? renderFocusArray(steps, true) : `<p>${escapeHTML(standardAnswer || "暂无标准答案")}</p>`}
+    </section>
+    <section class="calc-solution-idea">
+      <h3>解题思路</h3>
+      <p>${escapeHTML(solutionIdea)}</p>
+    </section>
+    <section class="calc-common-mistakes">
+      <h3>易错点</h3>
+      ${renderFocusArray(mistakes)}
+    </section>
+    <section class="calc-ai-chat" aria-label="AI 答疑">
+      <div>
+        <h3>AI 答疑</h3>
+        <p>看完答案后，如果某一步不理解，可以问 AI。</p>
+      </div>
+      <div class="calc-ai-chat-messages" data-calc-ai-messages>
+        <div class="calc-ai-chat-empty">看完答案后，如果某一步不理解，可以问 AI。</div>
+      </div>
+      <textarea class="calc-ai-input" data-calc-ai-input placeholder="例如：为什么损耗率 4% 要写成 1.04？"></textarea>
+      <button class="calc-ai-primary" type="button" data-action="calc-ai-ask" data-id="${escapeHTML(question.id)}">发送问题</button>
+    </section>
+  `;
+}
+
+function calculationQuestionPayload(question, userQuestion) {
+  return {
+    mode: "qa",
+    questionId: question.id,
+    userQuestion,
+    question: {
+      id: question.id,
+      title: question.title,
+      problem_text: question.problem_text || question.question_content || question.title,
+      formula: question.formula || "",
+      standard_steps: Array.isArray(question.standard_steps) ? question.standard_steps : [],
+      standard_answer: question.standard_answer || question.correct_answer || "",
+      solution_idea: question.solution_idea || "",
+      common_mistakes: Array.isArray(question.common_mistakes) ? question.common_mistakes : [],
+      calculation_type: question.calculation_type || "",
+      tags: question.tags || [],
+      relations: question.relations || [],
+      works: question.works || [],
+      virtual_works: question.virtual_works || [],
+      known_conditions: question.known_conditions || []
+    }
+  };
+}
+
+async function askFocusCalculationAi(questionId, userQuestion) {
+  const question = data.questions.find((item) => item.id === questionId);
+  if (!question || !isCalculationQuestion(question)) throw new Error("未找到当前计算题。");
+  const response = await fetch("/api/calc-ai", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(calculationQuestionPayload(question, userQuestion))
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload.ok) {
+    throw new Error(payload.message || payload.error || "AI 暂时无法回答，请稍后重试。");
+  }
+  return payload.answer || "AI 暂时没有返回内容。";
+}
+
+function appendFocusCalcAiMessage(role, content) {
+  const box = document.querySelector("[data-focus-detail-drawer] [data-calc-ai-messages]");
+  if (!box) return;
+  const empty = box.querySelector(".calc-ai-chat-empty");
+  if (empty) empty.remove();
+  const message = document.createElement("div");
+  message.className = `calc-ai-message ${role}`;
+  const bubble = document.createElement("span");
+  bubble.textContent = content;
+  message.appendChild(bubble);
+  box.appendChild(message);
+  box.scrollTop = box.scrollHeight;
+}
+
 function renderFocusDrawer(questionId, editing) {
   const question = data.questions.find((item) => item.id === questionId && item.is_final_focus);
   if (!question) return "";
@@ -1664,6 +1966,7 @@ function renderFocusDrawer(questionId, editing) {
   const memoryTipText = question.memory_tip || "暂无速记，建议结合答案关键词自己整理口诀。";
   const missingSource = question.source_status !== "已有书本来源";
   const progress = questionProgress(question.id);
+  const isCalcFocus = isCalculationQuestion(question);
   return `
     <div class="drawer-backdrop focus-backdrop focus-page-backdrop">
       <main class="question-drawer focus-drawer focus-detail-page" data-focus-detail-drawer>
@@ -1700,16 +2003,18 @@ function renderFocusDrawer(questionId, editing) {
           </form>
         ` : `
           <div class="focus-detail-body">
-            ${missingSource ? `<div class="source-warning"><strong>该题缺少书本来源，暂不作答</strong><span>请补充书本图片或可靠页码后，再手动录入答案。</span></div>` : ""}
-            <section><h3>答案</h3>${question.correct_answer ? `<p>${escapeHTML(question.correct_answer)}</p>` : `<p class="empty-answer">答案待补充，不可根据常识自动生成</p>`}</section>
-            ${usesMemoryTip ? `
-              <section class="memory-tip-section">
-                <div class="memory-tip-card">
-                  <h3 class="memory-tip-title">速记</h3>
-                  <p class="memory-tip-content">${escapeHTML(memoryTipText)}</p>
-                </div>
-              </section>
-            ` : `<section><h3>书本来源</h3><p>${escapeHTML(question.source || "缺书本来源")}</p></section>`}
+            ${isCalcFocus ? renderCalculationFocusDetail(question) : `
+              ${missingSource ? `<div class="source-warning"><strong>该题缺少书本来源，暂不作答</strong><span>请补充书本图片或可靠页码后，再手动录入答案。</span></div>` : ""}
+              <section><h3>答案</h3>${question.correct_answer ? `<p>${escapeHTML(question.correct_answer)}</p>` : `<p class="empty-answer">答案待补充，不可根据常识自动生成</p>`}</section>
+              ${usesMemoryTip ? `
+                <section class="memory-tip-section">
+                  <div class="memory-tip-card">
+                    <h3 class="memory-tip-title">速记</h3>
+                    <p class="memory-tip-content">${escapeHTML(memoryTipText)}</p>
+                  </div>
+                </section>
+              ` : `<section><h3>书本来源</h3><p>${escapeHTML(question.source || "缺书本来源")}</p></section>`}
+            `}
             <section class="focus-action-panel">
               <h3>收藏复习</h3>
               <div class="focus-action-buttons">
@@ -3086,7 +3391,7 @@ document.addEventListener("change", (event) => {
   if (focusFilter) renderSubject();
 });
 
-document.addEventListener("click", (event) => {
+document.addEventListener("click", async (event) => {
   const button = event.target.closest("button");
   if (!button) return;
   const action = button.dataset.action;
@@ -3207,6 +3512,33 @@ document.addEventListener("click", (event) => {
     focusDrawerEditing = false;
     renderSubject();
     pushAppState("focus-filter");
+  }
+
+  if (action === "calc-ai-ask" && button.closest("[data-focus-detail-drawer]")) {
+    const questionId = button.dataset.id;
+    const input = document.querySelector("[data-focus-detail-drawer] [data-calc-ai-input]");
+    const userQuestion = input ? input.value.trim() : "";
+
+    if (!userQuestion) {
+      toast("请输入你不理解的问题");
+      return;
+    }
+
+    try {
+      button.disabled = true;
+      button.textContent = "思考中...";
+      appendFocusCalcAiMessage("user", userQuestion);
+      if (input) input.value = "";
+      const answer = await askFocusCalculationAi(questionId, userQuestion);
+      appendFocusCalcAiMessage("assistant", answer);
+    } catch (error) {
+      console.error(error);
+      appendFocusCalcAiMessage("assistant", error.message || "AI 暂时无法回答，请稍后重试。");
+    } finally {
+      button.disabled = false;
+      button.textContent = "发送问题";
+    }
+    return;
   }
 
   if (action === "back-home") {
