@@ -15,7 +15,7 @@
       calculation_type: "network_node_time",
       problem_text: "已知某工程项目网络计划如图 6-40 所示，试用节点计算法在图上计算其节点和工作的时间参数。",
       questionText: "已知某工程项目网络计划如图 6-40 所示，试用节点计算法在图上计算其节点和工作的时间参数。",
-      formula: "ETj = max(ETi + Dij)；LTi = min(LTj - Dij)；Tc = ETn。",
+      formula: "ETⱼ = max(ETᵢ + Dᵢⱼ)；LTᵢ = min(LTⱼ - Dᵢⱼ)；T꜀ = ETₙ。",
       formulaHtml: "ET<sub>j</sub> = max(ET<sub>i</sub> + D<sub>ij</sub>)<br>LT<sub>i</sub> = min(LT<sub>j</sub> - D<sub>ij</sub>)<br>T<sub>c</sub> = ET<sub>n</sub>",
       images: [
         "/assets/calc/questions/calc-6-5-question.png"
@@ -46,8 +46,8 @@
         "起点节点 1 的最早时间 ET1 = 0。",
         "顺箭线方向计算最早时间，多个紧前工作取最大值。",
         "节点最早时间结果：1 为 0，2 为 2，3 为 4，4 为 4，5 为 8，6 为 12，7 为 10，8 为 15，9 为 17。",
-        "终点节点 9 的最早时间为 17，所以计算工期 Tc = 17。",
-        "若题目未规定计划工期，则计划工期 Tp = Tc = 17。",
+        "终点节点 9 的最早时间为 17，所以计算工期 T꜀ = 17。",
+        "若题目未规定计划工期，则计划工期 Tₚ = T꜀ = 17。",
         "从终点节点逆箭线方向计算最迟时间，多个紧后工作取最小值。",
         "节点最迟时间结果：1 为 0，2 为 2，3 为 5，4 为 7，5 为 11，6 为 12，7 为 11，8 为 15，9 为 17。",
         "关键线路为 1 → 2 → 6 → 8 → 9，对应关键工作 A、C、G、I。"

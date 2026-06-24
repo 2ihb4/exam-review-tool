@@ -1826,6 +1826,21 @@ function renderFocusArray(items, ordered = false) {
   return `<${tag}>${items.map((item) => `<li>${escapeHTML(item)}</li>`).join("")}</${tag}>`;
 }
 
+function trustedFormulaHtml(question) {
+  if (!question.formulaHtml) return "";
+  return String(question.formulaHtml)
+    .replace(/<(?!\/?(?:sub|br)\b)[^>]*>/gi, "")
+    .replace(/<br\s*\/?>/gi, "<br>")
+    .replace(/<sub>/gi, "<sub>")
+    .replace(/<\/sub>/gi, "</sub>");
+}
+
+function renderFormula(question) {
+  const formulaHtml = trustedFormulaHtml(question);
+  if (formulaHtml) return formulaHtml;
+  return escapeHTML(question.formula || "");
+}
+
 function renderCalculationSourceImages(question) {
   const images = calculationSourceImages(question);
   if (!images.length) return "";
@@ -1857,10 +1872,10 @@ function renderCalculationFocusDetail(question) {
       <h3>题目</h3>
       <p class="calc-ai-question-text">${escapeHTML(question.problem_text || question.question_content || question.title)}</p>
     </section>
-    ${question.formula ? `
+    ${question.formula || question.formulaHtml ? `
       <section class="calc-ai-result-section">
         <h3>公式</h3>
-        <p class="calc-ai-formula">${escapeHTML(question.formula)}</p>
+        <p class="calc-ai-formula">${renderFormula(question)}</p>
       </section>
     ` : ""}
     ${renderCalculationSourceImages(question)}

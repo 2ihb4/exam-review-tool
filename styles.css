@@ -733,6 +733,11 @@ textarea:focus {
   font-weight: 750;
 }
 
+.calc-ai-formula sub {
+  font-size: 0.7em;
+  vertical-align: sub;
+}
+
 .calc-ai-image-card {
   display: grid;
   gap: 8px;
