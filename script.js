@@ -309,6 +309,7 @@ let focusDetailTouchStartX = 0;
 let focusDetailTouchStartY = 0;
 let focusDetailTouchStartTime = 0;
 let contractQuestionTypeFilter = "choice";
+let contractFavoriteFilter = "all";
 let contractReviewIndexByType = {
   choice: 0,
   judge: 0,
@@ -1555,10 +1556,6 @@ function render() {
     return;
   }
   showApp();
-  renderHome();
-  renderSubject();
-  renderAdminLogin();
-  renderAdmin();
   const routeState = routeStateFromHash();
   if (!session.admin && routeState.view === "subject" && getSubject(routeState.subjectId)) {
     currentSubjectId = routeState.subjectId;
@@ -1568,11 +1565,17 @@ function render() {
       ? routeState.focusId
       : "";
     saveSession();
+    renderHome();
+    renderAdminLogin();
     renderSubject();
     showView("subjectView");
     replaceAppState("render-subject-from-hash");
     return;
   }
+  renderHome();
+  renderSubject();
+  renderAdminLogin();
+  if (session.admin) renderAdmin();
   showView(session.admin ? "adminView" : "homeView");
   replaceAppState("render");
 }
@@ -1837,18 +1840,21 @@ function contractQuestionsByType(typeValue = contractQuestionTypeFilter) {
 
 function contractStats(typeValue) {
   const questions = contractQuestionsByType(typeValue);
+  const favorite = questions.filter((question) => questionProgress(question.id).isFavorite).length;
   if (typeValue === "choice" || typeValue === "judge") {
     const done = questions.filter((question) => questionProgress(question.id).selectedAnswer).length;
     const correct = questions.filter((question) => questionProgress(question.id).isCorrect === true).length;
     const wrong = Math.max(0, done - correct);
-    return { total: questions.length, done, correct, wrong, favorite: 0 };
+    return { total: questions.length, done, correct, wrong, favorite };
   }
-  const favorite = questions.filter((question) => questionProgress(question.id).isFavorite).length;
   return { total: questions.length, done: 0, correct: 0, wrong: 0, favorite };
 }
 
 function renderContractManagementReview(subject) {
-  const questions = contractQuestionsByType();
+  const allQuestions = contractQuestionsByType();
+  const questions = contractFavoriteFilter === "favorite"
+    ? allQuestions.filter((question) => questionProgress(question.id).isFavorite)
+    : allQuestions;
   const currentQuestionId = reviewProgressService()?.getCurrentQuestion?.(subject.id) || "";
   const savedQuestionIndex = questions.findIndex((question) => question.id === currentQuestionId);
   if (savedQuestionIndex >= 0) {
@@ -1864,8 +1870,8 @@ function renderContractManagementReview(subject) {
       ${CONTRACT_TYPE_TABS.map((tab) => {
         const stats = contractStats(tab.value);
         const statText = tab.value === "choice" || tab.value === "judge"
-          ? `已做 ${stats.done} / ${stats.total}`
-          : `收藏 ${stats.favorite} / ${stats.total}`;
+          ? `已做 ${stats.done} / ${stats.total} · 收藏 ${stats.favorite}`
+          : `已收藏 ${stats.favorite} / ${stats.total}`;
         return `
           <button class="contract-type-tab ${contractQuestionTypeFilter === tab.value ? "active" : ""}" data-action="contract-type-filter" data-value="${tab.value}" type="button">
             <strong>${tab.label}</strong>
@@ -1874,10 +1880,26 @@ function renderContractManagementReview(subject) {
         `;
       }).join("")}
     </section>
+    <section class="contract-favorite-filter" aria-label="工程合同管理收藏筛选">
+      <button class="${contractFavoriteFilter === "all" ? "active" : ""}" data-action="contract-favorite-filter" data-value="all" type="button">全部</button>
+      <button class="${contractFavoriteFilter === "favorite" ? "active" : ""}" data-action="contract-favorite-filter" data-value="favorite" type="button">已收藏</button>
+    </section>
     ${questions.length
       ? renderContractQuestionCard(questions[currentIndex], currentIndex, questions.length)
-      : `<div class="empty-state"><h3>当前题型暂无题目</h3><p>请检查工程合同管理题库是否已导入。</p></div>`}
+      : renderContractEmptyState(allQuestions.length)}
   `;
+}
+
+function renderContractEmptyState(totalQuestions) {
+  if (contractFavoriteFilter === "favorite" && totalQuestions > 0) {
+    return `
+      <div class="empty-state">
+        <h3>暂无收藏题目。</h3>
+        <p>遇到不确定或想考前重点复习的题，可以点击收藏。</p>
+      </div>
+    `;
+  }
+  return `<div class="empty-state"><h3>当前题型暂无题目</h3><p>请检查工程合同管理题库是否已导入。</p></div>`;
 }
 
 function renderContractQuestionCard(question, index, total) {
@@ -1889,6 +1911,7 @@ function renderContractQuestionCard(question, index, total) {
 
 function renderContractQuizCard(question, index, total) {
   const progress = questionProgress(question.id);
+  const isFavorite = progress.isFavorite === true;
   const selectedAnswer = progress.selectedAnswer ? normalizeAnswerKey(progress.selectedAnswer) : "";
   const correctAnswer = normalizeAnswerKey(question.correct_answer);
   const hasAnswered = Boolean(selectedAnswer);
@@ -1904,7 +1927,10 @@ function renderContractQuizCard(question, index, total) {
         <span>${escapeHTML(question.question_type)} ${index + 1} / ${total}</span>
         <span>${hasAnswered ? (isCorrect ? "已做 · 正确" : "已做 · 错误") : "未作答"}</span>
       </div>
-      <h2>${escapeHTML(question.title || question.question_content)}</h2>
+      <div class="quiz-title-row">
+        <h2>${escapeHTML(question.title || question.question_content)}</h2>
+        <button class="favorite-button ${isFavorite ? "active" : ""}" data-action="contract-toggle-favorite" data-question-id="${question.id}" type="button">${isFavorite ? "★ 已收藏" : "☆ 收藏"}</button>
+      </div>
       <div class="quiz-options">
         ${normalizeOptions(question.options).map((option) => {
           const key = optionKey(option);
@@ -1934,17 +1960,18 @@ function renderContractQuizCard(question, index, total) {
 
 function renderContractRevealCard(question, index, total) {
   const progress = questionProgress(question.id);
+  const isFavorite = progress.isFavorite === true;
   const isRevealed = revealedContractAnswers.has(question.id);
   return `
     <article class="quiz-card answer-reveal-card">
       <div class="quiz-progress">
         <span>${escapeHTML(question.question_type)} ${index + 1} / ${total}</span>
-        <span>${progress.isFavorite ? "已收藏" : "未收藏"}</span>
+        <span>${isFavorite ? "已收藏" : "未收藏"}</span>
       </div>
       <h2>${escapeHTML(question.title || question.question_content)}</h2>
       <div class="reveal-actions">
         <button class="primary-button" data-action="contract-toggle-answer" data-question-id="${question.id}" type="button">${isRevealed ? "收起答案" : "查看答案"}</button>
-        <button class="small-button ${progress.isFavorite ? "active-favorite" : ""}" data-action="contract-toggle-favorite" data-question-id="${question.id}" type="button">${progress.isFavorite ? "已收藏" : "收藏"}</button>
+        <button class="favorite-button ${isFavorite ? "active" : ""}" data-action="contract-toggle-favorite" data-question-id="${question.id}" type="button">${isFavorite ? "★ 已收藏" : "☆ 收藏"}</button>
       </div>
       ${isRevealed ? renderContractAnswerBlocks(question, false) : ""}
       <div class="quiz-footer">
@@ -3876,10 +3903,18 @@ document.addEventListener("click", async (event) => {
     const nextType = button.dataset.value;
     if (CONTRACT_TYPE_TABS.some((tab) => tab.value === nextType)) {
       contractQuestionTypeFilter = nextType;
+      contractReviewIndexByType[contractQuestionTypeFilter] = 0;
       session.contractQuestionTypeFilter = contractQuestionTypeFilter;
       saveSession();
       renderSubject();
     }
+    return;
+  }
+
+  if (action === "contract-favorite-filter") {
+    contractFavoriteFilter = button.dataset.value === "favorite" ? "favorite" : "all";
+    contractReviewIndexByType[contractQuestionTypeFilter] = 0;
+    renderSubject();
     return;
   }
 
@@ -3917,6 +3952,13 @@ document.addEventListener("click", async (event) => {
   if (action === "contract-toggle-favorite") {
     const questionId = button.dataset.questionId;
     if (questionId) reviewProgressService()?.toggleFavorite(questionId);
+    if (contractFavoriteFilter === "favorite" && questionId && !questionProgress(questionId).isFavorite) {
+      const questions = contractQuestionsByType().filter((question) => questionProgress(question.id).isFavorite);
+      contractReviewIndexByType[contractQuestionTypeFilter] = Math.max(
+        0,
+        Math.min(Number(contractReviewIndexByType[contractQuestionTypeFilter] || 0), questions.length - 1)
+      );
+    }
     renderSubject();
     return;
   }
