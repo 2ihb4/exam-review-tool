@@ -141,6 +141,38 @@
     return nextValue;
   }
 
+  function saveQuestionAnswer(questionId, answer, isCorrect, subjectId) {
+    const timestamp = now();
+    return updateQuestion(questionId, subjectId, (current) => ({
+      ...current,
+      status: "reviewed",
+      mastery: isCorrect ? "known" : "unknown",
+      isWrong: !isCorrect,
+      selectedAnswer: String(answer || ""),
+      isCorrect: Boolean(isCorrect),
+      answeredAt: timestamp,
+      answerCount: Number(current.answerCount || 0) + 1,
+      reviewCount: Number(current.reviewCount || 0) + 1,
+      lastReviewedAt: timestamp,
+    }));
+  }
+
+  function resetQuestionAnswer(questionId, subjectId) {
+    return updateQuestion(questionId, subjectId, (current) => {
+      const next = {
+        ...current,
+        status: "not_started",
+        mastery: "unknown",
+        isWrong: false,
+        lastReviewedAt: null,
+      };
+      delete next.selectedAnswer;
+      delete next.isCorrect;
+      delete next.answeredAt;
+      return next;
+    });
+  }
+
   function setCurrentQuestion(subjectId, questionId) {
     const progress = readProgress();
     const subjectKey = String(subjectId);
@@ -193,6 +225,8 @@
     markKnown,
     markUnknown,
     toggleFavorite,
+    saveQuestionAnswer,
+    resetQuestionAnswer,
     setCurrentQuestion,
     getCurrentQuestion,
     getSubjectStats,

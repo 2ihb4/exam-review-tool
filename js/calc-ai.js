@@ -78,11 +78,10 @@
 
   function trustedFormulaHtml(question) {
     if (!question.formulaHtml) return "";
-    return String(question.formulaHtml)
-      .replace(/<(?!\/?(?:sub|br)\b)[^>]*>/gi, "")
-      .replace(/<br\s*\/?>/gi, "<br>")
-      .replace(/<sub>/gi, "<sub>")
-      .replace(/<\/sub>/gi, "</sub>");
+    return escapeHTML(question.formulaHtml)
+      .replace(/&lt;br\s*\/?&gt;/gi, "<br>")
+      .replace(/&lt;sub&gt;/gi, "<sub>")
+      .replace(/&lt;\/sub&gt;/gi, "</sub>");
   }
 
   function renderFormula(question) {

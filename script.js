@@ -10,6 +10,13 @@ const ADMIN_DEMO_PASSWORD_HASH = "c60d771b500d1b4f8a1c8438b0e0f8d89ee8bac756a768
 const QUESTION_TYPES = ["选择题", "判断题", "填空题", "名词解释", "简答题", "论述题", "计算题", "案例分析题", "简答题 / 选择题", "选择题 / 简答题", "简答题 / 计算题基础", "简答题 / 论述题"];
 const QUESTION_STATUSES = ["draft", "pending_review", "published", "hidden", "archived"];
 const QUESTION_SOURCES = ["老师划题", "课本习题", "往年题", "课堂截图整理", "AI 生成", "管理员录入"];
+const CONTRACT_MANAGEMENT_SUBJECT_ID = "s-accounting";
+const CONTRACT_TYPE_TABS = [
+  { value: "choice", label: "选择题", questionType: "选择题" },
+  { value: "judge", label: "判断题", questionType: "判断题" },
+  { value: "blank", label: "填空题", questionType: "填空题" },
+  { value: "short", label: "简答题", questionType: "简答题" },
+];
 
 const seedData = {
   users: [
@@ -301,6 +308,14 @@ let focusListScrollY = 0;
 let focusDetailTouchStartX = 0;
 let focusDetailTouchStartY = 0;
 let focusDetailTouchStartTime = 0;
+let contractQuestionTypeFilter = "choice";
+let contractReviewIndexByType = {
+  choice: 0,
+  judge: 0,
+  blank: 0,
+  short: 0,
+};
+let revealedContractAnswers = new Set();
 let isApplyingHistoryState = false;
 let adminQuestionFilters = {
   subject_id: "all",
@@ -651,6 +666,7 @@ function migrateData(current) {
       }
     });
   }
+  syncContractManagementQuestions(current, window.ContractManagementQuestionSeed || []);
   if (!current.meta?.cost_directory_seeded_v1) {
     const existingPointIds = new Set(current.key_points.map((point) => point.id));
     const costPoints = costManagementDirectory.map(([chapter, sequence, title, page_range], index) => {
@@ -686,6 +702,45 @@ function migrateData(current) {
   current.__needsSave = true;
   if (!alreadySeeded) current.__needsSave = true;
   return current;
+}
+
+function syncContractManagementQuestions(current, seeds = []) {
+  if (!Array.isArray(seeds) || !seeds.length) return;
+  seeds.forEach((seed) => {
+    if (!seed?.id) return;
+    const imported = normalizeQuestion({
+      ...seed,
+      subject: "工程合同管理",
+      subjectId: "contract-management",
+      subject_id: CONTRACT_MANAGEMENT_SUBJECT_ID,
+      chapter: seed.chapter || "期末重点",
+      question_content: seed.question_content || seed.title,
+      title: seed.title || seed.question_content,
+      source: seed.source || "工程合同管理与索赔复习资料",
+      source_status: seed.source_status || "已有书本来源",
+      memory_tip: seed.memory_tip || "",
+      difficulty: seed.difficulty || "medium",
+      importance: seed.importance || "high",
+      prediction_level: seed.prediction_level || "high",
+      is_final_focus: true,
+      is_prediction: seed.is_prediction !== false,
+      is_self_test: seed.is_self_test !== false,
+      is_ai_knowledge: seed.is_ai_knowledge !== false,
+      is_public: seed.is_public !== false,
+      status: seed.status || "published",
+      created_by: "u-admin",
+      created_at: seed.created_at || today(),
+      updated_at: today(),
+    });
+    const existing = current.questions.find((question) => question.id === imported.id);
+    if (existing) {
+      const keepCreatedAt = existing.created_at || imported.created_at;
+      Object.assign(existing, imported, { created_at: keepCreatedAt });
+    } else {
+      current.questions.push(imported);
+    }
+    current.__needsSave = true;
+  });
 }
 
 function syncEngineeringFocusQuestions(current, seeds = []) {
@@ -839,6 +894,8 @@ function normalizeQuestion(question) {
   const status = QUESTION_STATUSES.includes(question.status) ? question.status : question.is_public === false ? "hidden" : "published";
   return {
     id: question.id || uid("q"),
+    subject: question.subject || "",
+    subjectId: question.subjectId || "",
     subject_id: question.subject_id || "s-management",
     chapter: question.chapter || findChapterFromPointIds(question.key_point_ids || question.related_key_point_ids || []),
     key_point_ids: question.key_point_ids || question.related_key_point_ids || [],
@@ -846,7 +903,7 @@ function normalizeQuestion(question) {
     question_content: question.question_content || "",
     title: question.title || question.question_content || "",
     order: Number(question.order || 0),
-    options: Array.isArray(question.options) ? question.options : parseOptions(question.options || ""),
+    options: normalizeOptions(question.options || ""),
     correct_answer: question.correct_answer || question.reference_answer || "",
     explanation: question.explanation || "",
     source: question.source || "管理员录入",
@@ -897,6 +954,73 @@ function parseOptions(value) {
     .split(/\n+/)
     .map((line) => line.trim())
     .filter(Boolean);
+}
+
+function normalizeOptions(value) {
+  const options = parseOptions(value);
+  return options
+    .map((option) => {
+      if (option && typeof option === "object") {
+        return {
+          key: String(option.key || "").trim(),
+          text: String(option.text || "").trim(),
+        };
+      }
+      const text = String(option || "").trim();
+      const match = text.match(/^([A-D]|true|false|正确|错误|对|错)[\.．、\s]+(.+)$/i);
+      if (match) {
+        return {
+          key: normalizeAnswerKey(match[1]),
+          text: match[2].trim(),
+        };
+      }
+      return {
+        key: text,
+        text,
+      };
+    })
+    .filter((option) => option.key || option.text);
+}
+
+function normalizeAnswerKey(value) {
+  const raw = String(value ?? "").trim();
+  const lower = raw.toLowerCase();
+  if (["true", "正确", "对", "√", "✓"].includes(lower) || ["正确", "对", "√", "✓"].includes(raw)) return "true";
+  if (["false", "错误", "错", "×", "✕"].includes(lower) || ["错误", "错", "×", "✕"].includes(raw)) return "false";
+  const letter = raw.match(/[A-D]/i)?.[0];
+  if (letter) return letter.toUpperCase();
+  return raw;
+}
+
+function optionKey(option) {
+  if (option && typeof option === "object") return normalizeAnswerKey(option.key || option.text || "");
+  return normalizeAnswerKey(option);
+}
+
+function optionLabel(option) {
+  if (option && typeof option === "object") {
+    const key = String(option.key || "").trim();
+    const text = String(option.text || "").trim();
+    if (!key || key === text) return text;
+    if (["true", "false"].includes(key)) return text;
+    return `${key}. ${text}`;
+  }
+  return String(option || "");
+}
+
+function optionText(option) {
+  if (option && typeof option === "object") return String(option.text || option.key || "");
+  return String(option || "");
+}
+
+function optionsTextareaValue(options) {
+  return normalizeOptions(options)
+    .map((option) => {
+      const key = String(option.key || "").trim();
+      const text = String(option.text || "").trim();
+      return key && text && key !== text ? `${key}. ${text}` : text || key;
+    })
+    .join("\n");
 }
 
 function saveData() {
@@ -1362,6 +1486,17 @@ function routeHashFromState(state) {
   return hashParts.length ? `#${hashParts.join("&")}` : "#home";
 }
 
+function routeStateFromHash(hash = window.location.hash) {
+  const rawHash = String(hash || "").replace(/^#/, "");
+  const params = new URLSearchParams(rawHash);
+  return {
+    view: params.get("view") || (rawHash === "home" ? "home" : ""),
+    subjectId: params.get("subject") || "",
+    focusId: params.get("focus") || "",
+    filter: params.get("filter") || "all",
+  };
+}
+
 function sameRouteState(a, b) {
   return Boolean(
     a &&
@@ -1424,6 +1559,20 @@ function render() {
   renderSubject();
   renderAdminLogin();
   renderAdmin();
+  const routeState = routeStateFromHash();
+  if (!session.admin && routeState.view === "subject" && getSubject(routeState.subjectId)) {
+    currentSubjectId = routeState.subjectId;
+    session.currentSubjectId = currentSubjectId;
+    focusStatusFilter = normalizedFocusFilter(routeState.filter);
+    focusDrawerId = routeState.focusId && !isContractManagementSubject(getSubject(currentSubjectId)) && finalFocusQuestions(currentSubjectId).some((question) => question.id === routeState.focusId)
+      ? routeState.focusId
+      : "";
+    saveSession();
+    renderSubject();
+    showView("subjectView");
+    replaceAppState("render-subject-from-hash");
+    return;
+  }
   showView(session.admin ? "adminView" : "homeView");
   replaceAppState("render");
 }
@@ -1599,6 +1748,19 @@ function renderSubject() {
   if (!subject) return;
   currentSubjectId = subject.id;
   activeTab = "points";
+  if (isContractManagementSubject(subject) && !CONTRACT_TYPE_TABS.some((tab) => tab.value === contractQuestionTypeFilter)) {
+    contractQuestionTypeFilter = "choice";
+  }
+  if (
+    isContractManagementSubject(subject) &&
+    CONTRACT_TYPE_TABS.some((tab) => tab.value === session.contractQuestionTypeFilter)
+  ) {
+    contractQuestionTypeFilter = session.contractQuestionTypeFilter;
+  }
+  if (isContractManagementSubject(subject)) {
+    focusDrawerId = "";
+    focusDrawerEditing = false;
+  }
 
   $("#subjectView").innerHTML = `
     <div class="subject-workspace">
@@ -1615,7 +1777,7 @@ function renderSubject() {
       </div>
 
       <section class="content-panel">
-        ${renderPoints(subject)}
+        ${isContractManagementSubject(subject) ? renderContractManagementReview(subject) : renderPoints(subject)}
         ${isProjectManagementSubject(subject) ? `<div data-calc-ai-root></div>` : ""}
       </section>
     </div>
@@ -1626,6 +1788,10 @@ function renderSubject() {
 
 function isProjectManagementSubject(subject) {
   return Boolean(subject && (subject.id === "s-management" || subject.name === "工程项目管理"));
+}
+
+function isContractManagementSubject(subject) {
+  return Boolean(subject && (subject.id === CONTRACT_MANAGEMENT_SUBJECT_ID || subject.name === "工程合同管理"));
 }
 
 function renderCalcAiForCurrentSubject() {
@@ -1660,6 +1826,158 @@ function finalFocusQuestions(subjectId) {
   return data.questions
     .filter((question) => question.subject_id === subjectId && question.is_final_focus && question.is_public && question.status === "published")
     .sort((a, b) => a.order - b.order);
+}
+
+function contractQuestionsByType(typeValue = contractQuestionTypeFilter) {
+  const tab = CONTRACT_TYPE_TABS.find((item) => item.value === typeValue) || CONTRACT_TYPE_TABS[0];
+  return finalFocusQuestions(CONTRACT_MANAGEMENT_SUBJECT_ID)
+    .filter((question) => question.question_type === tab.questionType)
+    .sort((a, b) => a.order - b.order);
+}
+
+function contractStats(typeValue) {
+  const questions = contractQuestionsByType(typeValue);
+  if (typeValue === "choice" || typeValue === "judge") {
+    const done = questions.filter((question) => questionProgress(question.id).selectedAnswer).length;
+    const correct = questions.filter((question) => questionProgress(question.id).isCorrect === true).length;
+    const wrong = Math.max(0, done - correct);
+    return { total: questions.length, done, correct, wrong, favorite: 0 };
+  }
+  const favorite = questions.filter((question) => questionProgress(question.id).isFavorite).length;
+  return { total: questions.length, done: 0, correct: 0, wrong: 0, favorite };
+}
+
+function renderContractManagementReview(subject) {
+  const questions = contractQuestionsByType();
+  const currentQuestionId = reviewProgressService()?.getCurrentQuestion?.(subject.id) || "";
+  const savedQuestionIndex = questions.findIndex((question) => question.id === currentQuestionId);
+  if (savedQuestionIndex >= 0) {
+    contractReviewIndexByType[contractQuestionTypeFilter] = savedQuestionIndex;
+  }
+  const currentIndex = Math.max(
+    0,
+    Math.min(questions.length - 1, Number(contractReviewIndexByType[contractQuestionTypeFilter] || 0))
+  );
+  contractReviewIndexByType[contractQuestionTypeFilter] = currentIndex;
+  return `
+    <section class="contract-type-tabs" aria-label="工程合同管理题型切换">
+      ${CONTRACT_TYPE_TABS.map((tab) => {
+        const stats = contractStats(tab.value);
+        const statText = tab.value === "choice" || tab.value === "judge"
+          ? `已做 ${stats.done} / ${stats.total}`
+          : `收藏 ${stats.favorite} / ${stats.total}`;
+        return `
+          <button class="contract-type-tab ${contractQuestionTypeFilter === tab.value ? "active" : ""}" data-action="contract-type-filter" data-value="${tab.value}" type="button">
+            <strong>${tab.label}</strong>
+            <span>${statText}</span>
+          </button>
+        `;
+      }).join("")}
+    </section>
+    ${questions.length
+      ? renderContractQuestionCard(questions[currentIndex], currentIndex, questions.length)
+      : `<div class="empty-state"><h3>当前题型暂无题目</h3><p>请检查工程合同管理题库是否已导入。</p></div>`}
+  `;
+}
+
+function renderContractQuestionCard(question, index, total) {
+  if (contractQuestionTypeFilter === "choice" || contractQuestionTypeFilter === "judge") {
+    return renderContractQuizCard(question, index, total);
+  }
+  return renderContractRevealCard(question, index, total);
+}
+
+function renderContractQuizCard(question, index, total) {
+  const progress = questionProgress(question.id);
+  const selectedAnswer = progress.selectedAnswer ? normalizeAnswerKey(progress.selectedAnswer) : "";
+  const correctAnswer = normalizeAnswerKey(question.correct_answer);
+  const hasAnswered = Boolean(selectedAnswer);
+  const isCorrect = hasAnswered && selectedAnswer === correctAnswer;
+  const feedbackText = !hasAnswered
+    ? "选择一个选项后，会立即显示对错。"
+    : isCorrect
+      ? "回答正确"
+      : `回答错误，正确答案是 ${displayCorrectAnswer(question)}`;
+  return `
+    <article class="quiz-card">
+      <div class="quiz-progress">
+        <span>${escapeHTML(question.question_type)} ${index + 1} / ${total}</span>
+        <span>${hasAnswered ? (isCorrect ? "已做 · 正确" : "已做 · 错误") : "未作答"}</span>
+      </div>
+      <h2>${escapeHTML(question.title || question.question_content)}</h2>
+      <div class="quiz-options">
+        ${normalizeOptions(question.options).map((option) => {
+          const key = optionKey(option);
+          const classNames = ["quiz-option"];
+          if (hasAnswered && key === selectedAnswer) classNames.push("selected");
+          if (hasAnswered && key === correctAnswer) classNames.push("correct");
+          if (hasAnswered && key === selectedAnswer && key !== correctAnswer) classNames.push("wrong");
+          return `
+            <button class="${classNames.join(" ")}" data-action="contract-answer-option" data-question-id="${question.id}" data-answer="${escapeHTML(key)}" ${hasAnswered ? "disabled" : ""} type="button">
+              <span>${escapeHTML(optionLabel(option))}</span>
+            </button>
+          `;
+        }).join("")}
+      </div>
+      <div class="quiz-feedback ${hasAnswered ? (isCorrect ? "correct" : "wrong") : ""}">
+        ${escapeHTML(feedbackText)}
+      </div>
+      ${hasAnswered ? renderContractAnswerBlocks(question, true) : ""}
+      <div class="quiz-footer">
+        <button class="small-button" data-action="contract-prev-question" ${index > 0 ? "" : "disabled"} type="button">上一题</button>
+        <button class="small-button" data-action="contract-reset-answer" data-question-id="${question.id}" ${hasAnswered ? "" : "disabled"} type="button">重新选择</button>
+        <button class="primary-button" data-action="contract-next-question" ${index < total - 1 ? "" : "disabled"} type="button">下一题</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderContractRevealCard(question, index, total) {
+  const progress = questionProgress(question.id);
+  const isRevealed = revealedContractAnswers.has(question.id);
+  return `
+    <article class="quiz-card answer-reveal-card">
+      <div class="quiz-progress">
+        <span>${escapeHTML(question.question_type)} ${index + 1} / ${total}</span>
+        <span>${progress.isFavorite ? "已收藏" : "未收藏"}</span>
+      </div>
+      <h2>${escapeHTML(question.title || question.question_content)}</h2>
+      <div class="reveal-actions">
+        <button class="primary-button" data-action="contract-toggle-answer" data-question-id="${question.id}" type="button">${isRevealed ? "收起答案" : "查看答案"}</button>
+        <button class="small-button ${progress.isFavorite ? "active-favorite" : ""}" data-action="contract-toggle-favorite" data-question-id="${question.id}" type="button">${progress.isFavorite ? "已收藏" : "收藏"}</button>
+      </div>
+      ${isRevealed ? renderContractAnswerBlocks(question, false) : ""}
+      <div class="quiz-footer">
+        <button class="small-button" data-action="contract-prev-question" ${index > 0 ? "" : "disabled"} type="button">上一题</button>
+        <span>${index + 1} / ${total}</span>
+        <button class="primary-button" data-action="contract-next-question" ${index < total - 1 ? "" : "disabled"} type="button">下一题</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderContractAnswerBlocks(question, includeExplanation) {
+  const answerTitle = includeExplanation ? "答案解析" : "标准答案";
+  const answerText = includeExplanation
+    ? question.explanation || question.correct_answer || "暂无解析"
+    : question.correct_answer || "暂无标准答案";
+  return `
+    <section class="answer-block">
+      <h3>${answerTitle}</h3>
+      <p>${escapeHTML(answerText)}</p>
+    </section>
+    <section class="memory-tip-card">
+      <h3 class="memory-tip-title">速记</h3>
+      <p class="memory-tip-content">${escapeHTML(question.memory_tip || "暂无速记")}</p>
+    </section>
+  `;
+}
+
+function displayCorrectAnswer(question) {
+  const correctAnswer = normalizeAnswerKey(question.correct_answer);
+  const matchedOption = normalizeOptions(question.options).find((option) => optionKey(option) === correctAnswer);
+  if (matchedOption && ["true", "false"].includes(correctAnswer)) return optionText(matchedOption);
+  return correctAnswer || optionText(matchedOption) || "未设置";
 }
 
 function reviewProgressService() {
@@ -1752,6 +2070,32 @@ function continueStudy() {
   return false;
 }
 
+function moveContractQuestion(delta) {
+  const questions = contractQuestionsByType();
+  if (!questions.length) return;
+  const currentIndex = Number(contractReviewIndexByType[contractQuestionTypeFilter] || 0);
+  const nextIndex = Math.max(0, Math.min(questions.length - 1, currentIndex + delta));
+  contractReviewIndexByType[contractQuestionTypeFilter] = nextIndex;
+  reviewProgressService()?.setCurrentQuestion(currentSubjectId, questions[nextIndex]?.id);
+  session.contractQuestionTypeFilter = contractQuestionTypeFilter;
+  saveSession();
+  renderSubject();
+}
+
+function saveContractQuestionAnswer(question, answer) {
+  const selectedAnswer = normalizeAnswerKey(answer);
+  const correctAnswer = normalizeAnswerKey(question.correct_answer);
+  const isCorrect = selectedAnswer === correctAnswer;
+  const service = reviewProgressService();
+  if (service?.saveQuestionAnswer) {
+    service.saveQuestionAnswer(question.id, selectedAnswer, isCorrect, question.subject_id);
+  } else {
+    isCorrect ? service?.markKnown?.(question.id, question.subject_id) : service?.markUnknown?.(question.id, question.subject_id);
+  }
+  service?.setCurrentQuestion?.(question.subject_id, question.id);
+  return isCorrect;
+}
+
 function renderFinalFocus(subject) {
   if (!["all", "favorite"].includes(focusStatusFilter)) focusStatusFilter = "all";
   const questions = focusVisibleQuestions();
@@ -1828,11 +2172,10 @@ function renderFocusArray(items, ordered = false) {
 
 function trustedFormulaHtml(question) {
   if (!question.formulaHtml) return "";
-  return String(question.formulaHtml)
-    .replace(/<(?!\/?(?:sub|br)\b)[^>]*>/gi, "")
-    .replace(/<br\s*\/?>/gi, "<br>")
-    .replace(/<sub>/gi, "<sub>")
-    .replace(/<\/sub>/gi, "</sub>");
+  return escapeHTML(question.formulaHtml)
+    .replace(/&lt;br\s*\/?&gt;/gi, "<br>")
+    .replace(/&lt;sub&gt;/gi, "<sub>")
+    .replace(/&lt;\/sub&gt;/gi, "</sub>");
 }
 
 function renderFormula(question) {
@@ -2135,8 +2478,8 @@ function renderSelfTest(point) {
       <p class="self-test-question">${escapeHTML(question.question_content)}</p>
       ${question.options.length ? `
         <div class="choice-grid">
-          ${question.options.map((option) => `
-            <button class="small-button" data-action="answer-choice" data-question-id="${question.id}" data-answer="${escapeHTML(option)}">${escapeHTML(option)}</button>
+          ${normalizeOptions(question.options).map((option) => `
+            <button class="small-button" data-action="answer-choice" data-question-id="${question.id}" data-answer="${escapeHTML(optionKey(option))}">${escapeHTML(optionLabel(option))}</button>
           `).join("")}
         </div>
       ` : `
@@ -2230,7 +2573,7 @@ function renderPracticeCard(question) {
       </header>
       <h3>${escapeHTML(question.question_content)}</h3>
       ${question.options.length ? `
-        <div class="choice-grid">${question.options.map((option) => `<button class="small-button" data-action="answer-practice-choice" data-question-id="${question.id}" data-answer="${escapeHTML(option)}">${escapeHTML(option)}</button>`).join("")}</div>
+        <div class="choice-grid">${normalizeOptions(question.options).map((option) => `<button class="small-button" data-action="answer-practice-choice" data-question-id="${question.id}" data-answer="${escapeHTML(optionKey(option))}">${escapeHTML(optionLabel(option))}</button>`).join("")}</div>
       ` : `
         <form class="comment-form" data-form="practice-answer" data-question-id="${question.id}">
           <textarea name="answer" placeholder="写下你的答案，提交后会立即反馈"></textarea>
@@ -2378,7 +2721,7 @@ function renderQuestionCard(question) {
         <span class="pill ${levelClass(question.prediction_level)}">预测程度：${probabilityLabel(question.prediction_level)}</span>
       </header>
       <h3>${escapeHTML(question.question_content)}</h3>
-      ${question.options.length ? `<ol class="option-list">${question.options.map((option) => `<li>${escapeHTML(option)}</li>`).join("")}</ol>` : ""}
+      ${question.options.length ? `<ol class="option-list">${normalizeOptions(question.options).map((option) => `<li>${escapeHTML(optionLabel(option))}</li>`).join("")}</ol>` : ""}
       <div class="pill-row">
         <span class="pill">关联知识点：${escapeHTML(related || "未关联")}</span>
         <span class="pill">来源：${escapeHTML(question.source)}</span>
@@ -2902,7 +3245,7 @@ function renderQuestionDrawer(questionId) {
           <label class="wide">关联知识点<select name="key_point_ids" multiple size="6">${points.map((point) => `<option value="${point.id}" ${question.key_point_ids.includes(point.id) ? "selected" : ""}>${escapeHTML(point.chapter)} · ${escapeHTML(point.title)}</option>`).join("")}</select></label>
           <label class="wide">知识点标签<input name="tags" value="${escapeHTML(question.tags.join("、"))}" placeholder="用顿号或逗号分隔，可用于没有知识点记录的题目" /></label>
           <label class="wide">题目内容<textarea name="question_content" required>${escapeHTML(question.question_content)}</textarea></label>
-          <label class="wide">选择题选项<textarea name="options" placeholder="一行一个选项，非选择题可留空">${escapeHTML(question.options.join("\n"))}</textarea></label>
+          <label class="wide">选择题选项<textarea name="options" placeholder="一行一个选项，非选择题可留空">${escapeHTML(optionsTextareaValue(question.options))}</textarea></label>
           <label class="wide">参考答案<textarea name="correct_answer">${escapeHTML(question.correct_answer)}</textarea></label>
           <label class="wide">答案解析<textarea name="explanation">${escapeHTML(question.explanation)}</textarea></label>
           <label class="wide">速记<textarea name="memory_tip" placeholder="可选，用于学生端记忆卡展示">${escapeHTML(question.memory_tip || "")}</textarea></label>
@@ -3527,6 +3870,55 @@ document.addEventListener("click", async (event) => {
     focusDrawerEditing = false;
     renderSubject();
     pushAppState("focus-filter");
+  }
+
+  if (action === "contract-type-filter") {
+    const nextType = button.dataset.value;
+    if (CONTRACT_TYPE_TABS.some((tab) => tab.value === nextType)) {
+      contractQuestionTypeFilter = nextType;
+      session.contractQuestionTypeFilter = contractQuestionTypeFilter;
+      saveSession();
+      renderSubject();
+    }
+    return;
+  }
+
+  if (action === "contract-answer-option") {
+    const question = data.questions.find((item) => item.id === button.dataset.questionId);
+    if (!question) return toast("题目不存在");
+    if (questionProgress(question.id).selectedAnswer) return;
+    const isCorrect = saveContractQuestionAnswer(question, button.dataset.answer);
+    renderSubject();
+    toast(isCorrect ? "回答正确" : `回答错误，正确答案是 ${displayCorrectAnswer(question)}`);
+    return;
+  }
+
+  if (action === "contract-prev-question" || action === "contract-next-question") {
+    moveContractQuestion(action === "contract-next-question" ? 1 : -1);
+    return;
+  }
+
+  if (action === "contract-reset-answer") {
+    const question = data.questions.find((item) => item.id === button.dataset.questionId);
+    if (!question) return;
+    reviewProgressService()?.resetQuestionAnswer?.(question.id, question.subject_id);
+    renderSubject();
+    return;
+  }
+
+  if (action === "contract-toggle-answer") {
+    const questionId = button.dataset.questionId;
+    revealedContractAnswers.has(questionId) ? revealedContractAnswers.delete(questionId) : revealedContractAnswers.add(questionId);
+    if (questionId) reviewProgressService()?.markReviewed?.(questionId, currentSubjectId);
+    renderSubject();
+    return;
+  }
+
+  if (action === "contract-toggle-favorite") {
+    const questionId = button.dataset.questionId;
+    if (questionId) reviewProgressService()?.toggleFavorite(questionId);
+    renderSubject();
+    return;
   }
 
   if (action === "calc-ai-ask" && button.closest("[data-focus-detail-drawer]")) {
