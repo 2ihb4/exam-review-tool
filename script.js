@@ -1786,6 +1786,7 @@ function renderSubject() {
     </div>
   `;
   if (currentView === "subject") renderCalcAiForCurrentSubject();
+  if (isContractManagementSubject(subject)) requestAnimationFrame(setupContractSwipe);
   if (focusDrawerId) requestAnimationFrame(setupFocusDetailSwipe);
 }
 
@@ -1831,11 +1832,27 @@ function finalFocusQuestions(subjectId) {
     .sort((a, b) => a.order - b.order);
 }
 
+function currentSubjectProgressQuestions(subject = getSubject(currentSubjectId)) {
+  if (!subject) return [];
+  return data.questions.filter((question) => (
+    question.subject_id === subject.id ||
+    question.subjectId === subject.id ||
+    question.subject === subject.name
+  ));
+}
+
 function contractQuestionsByType(typeValue = contractQuestionTypeFilter) {
   const tab = CONTRACT_TYPE_TABS.find((item) => item.value === typeValue) || CONTRACT_TYPE_TABS[0];
   return finalFocusQuestions(CONTRACT_MANAGEMENT_SUBJECT_ID)
     .filter((question) => question.question_type === tab.questionType)
     .sort((a, b) => a.order - b.order);
+}
+
+function visibleContractQuestions(typeValue = contractQuestionTypeFilter) {
+  const questions = contractQuestionsByType(typeValue);
+  return contractFavoriteFilter === "favorite"
+    ? questions.filter((question) => questionProgress(question.id).isFavorite)
+    : questions;
 }
 
 function contractStats(typeValue) {
@@ -1852,9 +1869,7 @@ function contractStats(typeValue) {
 
 function renderContractManagementReview(subject) {
   const allQuestions = contractQuestionsByType();
-  const questions = contractFavoriteFilter === "favorite"
-    ? allQuestions.filter((question) => questionProgress(question.id).isFavorite)
-    : allQuestions;
+  const questions = visibleContractQuestions();
   const currentQuestionId = reviewProgressService()?.getCurrentQuestion?.(subject.id) || "";
   const savedQuestionIndex = questions.findIndex((question) => question.id === currentQuestionId);
   if (savedQuestionIndex >= 0) {
@@ -1884,9 +1899,27 @@ function renderContractManagementReview(subject) {
       <button class="${contractFavoriteFilter === "all" ? "active" : ""}" data-action="contract-favorite-filter" data-value="all" type="button">全部</button>
       <button class="${contractFavoriteFilter === "favorite" ? "active" : ""}" data-action="contract-favorite-filter" data-value="favorite" type="button">已收藏</button>
     </section>
-    ${questions.length
-      ? renderContractQuestionCard(questions[currentIndex], currentIndex, questions.length)
-      : renderContractEmptyState(allQuestions.length)}
+    <section class="subject-progress-tools" aria-label="当前科目做题记录操作">
+      <button class="clear-progress-button danger-outline-button" data-action="clear-subject-progress" type="button">清空做题记录</button>
+      <span>仅清空当前科目的作答记录，收藏会保留。</span>
+    </section>
+    <div class="contract-practice-area" data-contract-swipe-area>
+      ${questions.length
+        ? `${renderContractQuestionCard(questions[currentIndex], currentIndex, questions.length)}${renderContractSwipeHint()}`
+        : renderContractEmptyState(allQuestions.length)}
+    </div>
+  `;
+}
+
+function renderContractSwipeHint() {
+  const revealHint = contractQuestionTypeFilter === "blank" || contractQuestionTypeFilter === "short"
+    ? `<span>点击卡片显示答案和速记</span>`
+    : "";
+  return `
+    <p class="contract-swipe-hint">
+      <span>左右滑动切换题目</span>
+      ${revealHint}
+    </p>
   `;
 }
 
@@ -1922,7 +1955,7 @@ function renderContractQuizCard(question, index, total) {
       ? "回答正确"
       : `回答错误，正确答案是 ${displayCorrectAnswer(question)}`;
   return `
-    <article class="quiz-card">
+    <article class="quiz-card contract-quiz-card">
       <div class="quiz-progress">
         <span>${escapeHTML(question.question_type)} ${index + 1} / ${total}</span>
         <span>${hasAnswered ? (isCorrect ? "已做 · 正确" : "已做 · 错误") : "未作答"}</span>
@@ -1963,14 +1996,14 @@ function renderContractRevealCard(question, index, total) {
   const isFavorite = progress.isFavorite === true;
   const isRevealed = revealedContractAnswers.has(question.id);
   return `
-    <article class="quiz-card answer-reveal-card">
+    <article class="quiz-card answer-reveal-card contract-reveal-card" data-action="toggle-contract-answer" data-id="${question.id}" tabindex="0" aria-expanded="${isRevealed ? "true" : "false"}">
       <div class="quiz-progress">
         <span>${escapeHTML(question.question_type)} ${index + 1} / ${total}</span>
         <span>${isFavorite ? "已收藏" : "未收藏"}</span>
       </div>
       <h2>${escapeHTML(question.title || question.question_content)}</h2>
       <div class="reveal-actions">
-        <button class="primary-button" data-action="contract-toggle-answer" data-question-id="${question.id}" type="button">${isRevealed ? "收起答案" : "查看答案"}</button>
+        <button class="primary-button" data-action="toggle-contract-answer" data-id="${question.id}" type="button">${isRevealed ? "收起答案" : "查看答案"}</button>
         <button class="favorite-button ${isFavorite ? "active" : ""}" data-action="contract-toggle-favorite" data-question-id="${question.id}" type="button">${isFavorite ? "★ 已收藏" : "☆ 收藏"}</button>
       </div>
       ${isRevealed ? renderContractAnswerBlocks(question, false) : ""}
@@ -1989,11 +2022,11 @@ function renderContractAnswerBlocks(question, includeExplanation) {
     ? question.explanation || question.correct_answer || "暂无解析"
     : question.correct_answer || "暂无标准答案";
   return `
-    <section class="answer-block">
+    <section class="answer-block contract-answer-panel">
       <h3>${answerTitle}</h3>
       <p>${escapeHTML(answerText)}</p>
     </section>
-    <section class="memory-tip-card">
+    <section class="memory-tip-card contract-memory-tip">
       <h3 class="memory-tip-title">速记</h3>
       <p class="memory-tip-content">${escapeHTML(question.memory_tip || "暂无速记")}</p>
     </section>
@@ -2098,15 +2131,71 @@ function continueStudy() {
 }
 
 function moveContractQuestion(delta) {
-  const questions = contractQuestionsByType();
+  const questions = visibleContractQuestions();
   if (!questions.length) return;
   const currentIndex = Number(contractReviewIndexByType[contractQuestionTypeFilter] || 0);
-  const nextIndex = Math.max(0, Math.min(questions.length - 1, currentIndex + delta));
+  const nextIndex = currentIndex + delta;
+  if (nextIndex < 0 || nextIndex >= questions.length) return;
   contractReviewIndexByType[contractQuestionTypeFilter] = nextIndex;
   reviewProgressService()?.setCurrentQuestion(currentSubjectId, questions[nextIndex]?.id);
   session.contractQuestionTypeFilter = contractQuestionTypeFilter;
   saveSession();
   renderSubject();
+  requestAnimationFrame(() => {
+    setupContractSwipe();
+    document.querySelector("[data-contract-swipe-area]")?.scrollIntoView({
+      block: "start",
+      behavior: "smooth",
+    });
+  });
+}
+
+function isContractInteractiveTarget(target) {
+  if (!target) return false;
+  const tagName = target.tagName?.toLowerCase();
+  if (["input", "textarea", "select"].includes(tagName) || target.isContentEditable) return true;
+  return Boolean(target.closest("button, a, input, textarea, select, [role='button'], .quiz-option, .favorite-button, .clear-progress-button, [data-admin-question-filter], [data-focus-detail-drawer]"));
+}
+
+function setupContractSwipe() {
+  const area = document.querySelector("[data-contract-swipe-area]");
+  if (!area || area.dataset.swipeReady === "true") return;
+  area.dataset.swipeReady = "true";
+
+  let startX = 0;
+  let startY = 0;
+  let startTime = 0;
+
+  area.addEventListener("touchstart", (event) => {
+    if (isContractInteractiveTarget(event.target)) {
+      startX = 0;
+      startY = 0;
+      return;
+    }
+    const touch = event.touches && event.touches[0];
+    if (!touch) return;
+    startX = touch.clientX;
+    startY = touch.clientY;
+    startTime = Date.now();
+  }, { passive: true });
+
+  area.addEventListener("touchend", (event) => {
+    if (!startX || !startY) return;
+    const touch = event.changedTouches && event.changedTouches[0];
+    if (!touch) return;
+
+    const deltaX = touch.clientX - startX;
+    const deltaY = touch.clientY - startY;
+    const elapsed = Date.now() - startTime;
+    startX = 0;
+    startY = 0;
+    startTime = 0;
+
+    if (elapsed > 900) return;
+    if (Math.abs(deltaX) < 70) return;
+    if (Math.abs(deltaX) < Math.abs(deltaY) * 1.4) return;
+    moveContractQuestion(deltaX < 0 ? 1 : -1);
+  }, { passive: true });
 }
 
 function saveContractQuestionAnswer(question, answer) {
@@ -3776,8 +3865,21 @@ document.addEventListener("change", (event) => {
   if (focusFilter) renderSubject();
 });
 
+document.addEventListener("keydown", (event) => {
+  if (!["Enter", " "].includes(event.key)) return;
+  const card = event.target.closest?.(".contract-reveal-card[data-action='toggle-contract-answer']");
+  if (!card || isContractInteractiveTarget(event.target)) return;
+  event.preventDefault();
+  const questionId = card.dataset.id;
+  if (!questionId) return;
+  revealedContractAnswers.has(questionId) ? revealedContractAnswers.delete(questionId) : revealedContractAnswers.add(questionId);
+  reviewProgressService()?.markReviewed?.(questionId, currentSubjectId);
+  renderSubject();
+});
+
 document.addEventListener("click", async (event) => {
-  const button = event.target.closest("button");
+  const actionTarget = event.target.closest("[data-action]");
+  const button = event.target.closest("button") || actionTarget;
   if (!button) return;
   const action = button.dataset.action;
 
@@ -3918,6 +4020,24 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
+  if (action === "clear-subject-progress") {
+    const subject = getSubject(currentSubjectId);
+    if (!subject) return toast("当前科目不存在");
+    const confirmed = window.confirm("确定清空当前科目的做题记录吗？收藏会保留，题库不会删除。");
+    if (!confirmed) return;
+    const questions = currentSubjectProgressQuestions(subject);
+    reviewProgressService()?.clearSubjectProgress?.(subject.id, questions, { keepFavorite: true });
+    focusDrawerId = "";
+    focusDrawerEditing = false;
+    revealedContractAnswers.clear();
+    Object.keys(contractReviewIndexByType).forEach((key) => {
+      contractReviewIndexByType[key] = 0;
+    });
+    toast("已清空当前科目的做题记录，收藏已保留。");
+    renderSubject();
+    return;
+  }
+
   if (action === "contract-answer-option") {
     const question = data.questions.find((item) => item.id === button.dataset.questionId);
     if (!question) return toast("题目不存在");
@@ -3941,8 +4061,9 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
-  if (action === "contract-toggle-answer") {
-    const questionId = button.dataset.questionId;
+  if (action === "contract-toggle-answer" || action === "toggle-contract-answer") {
+    if (action === "toggle-contract-answer" && isContractInteractiveTarget(event.target) && event.target !== button) return;
+    const questionId = button.dataset.id || button.dataset.questionId;
     revealedContractAnswers.has(questionId) ? revealedContractAnswers.delete(questionId) : revealedContractAnswers.add(questionId);
     if (questionId) reviewProgressService()?.markReviewed?.(questionId, currentSubjectId);
     renderSubject();

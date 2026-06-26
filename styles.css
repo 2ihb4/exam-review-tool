@@ -2154,6 +2154,58 @@ textarea:focus {
   background: var(--text);
 }
 
+.subject-progress-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: flex-start;
+  max-width: 100%;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.subject-progress-tools span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.clear-progress-button,
+.danger-outline-button {
+  min-height: 36px;
+  border: 1px solid rgba(220, 38, 38, 0.28);
+  border-radius: 999px;
+  padding: 8px 14px;
+  color: #9f1239;
+  background: #fff;
+  font-size: 14px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.clear-progress-button:hover,
+.danger-outline-button:hover {
+  border-color: rgba(220, 38, 38, 0.45);
+  background: #fff7f7;
+}
+
+.contract-practice-area {
+  min-width: 0;
+  max-width: 100%;
+  touch-action: pan-y;
+}
+
+.contract-swipe-hint {
+  display: grid;
+  gap: 4px;
+  margin: 12px 0 0;
+  color: #8a8f98;
+  font-size: 14px;
+  line-height: 1.45;
+  text-align: center;
+}
+
 .quiz-card {
   display: grid;
   gap: 16px;
@@ -2184,6 +2236,20 @@ textarea:focus {
   min-width: 0;
 }
 
+.contract-reveal-card {
+  cursor: pointer;
+  transition: transform 0.16s ease, border-color 0.16s ease, background 0.16s ease;
+}
+
+.contract-reveal-card:active {
+  transform: scale(0.995);
+}
+
+.contract-reveal-card:focus-visible {
+  outline: 3px solid rgba(0, 113, 227, 0.18);
+  outline-offset: 3px;
+}
+
 .favorite-button {
   min-height: 38px;
   border: 1px solid var(--line);
@@ -2205,6 +2271,21 @@ textarea:focus {
   border-color: var(--blue);
   color: #fff;
   background: var(--blue);
+}
+
+.contract-answer-panel {
+  margin-top: 4px;
+  padding: 16px;
+  border-radius: 18px;
+  background: #f8fafc;
+}
+
+.contract-memory-tip {
+  margin-top: 4px;
+  padding: 14px;
+  border-radius: 16px;
+  background: #eef6ff;
+  color: #075985;
 }
 
 .quiz-progress {
@@ -3242,6 +3323,17 @@ th {
   .contract-favorite-filter button {
     flex: 1;
     min-height: 38px;
+  }
+
+  .subject-progress-tools {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .clear-progress-button,
+  .danger-outline-button {
+    width: 100%;
+    min-height: 44px;
   }
 
   .quiz-option {

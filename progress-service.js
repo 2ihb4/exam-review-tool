@@ -165,12 +165,59 @@
         mastery: "unknown",
         isWrong: false,
         lastReviewedAt: null,
+        answerCount: 0,
+        reviewCount: 0,
       };
       delete next.selectedAnswer;
       delete next.isCorrect;
       delete next.answeredAt;
       return next;
     });
+  }
+
+  function clearSubjectProgress(subjectId, questions, options) {
+    const progress = readProgress();
+    const subjectKey = String(subjectId || "");
+    const hasQuestionList = Array.isArray(questions);
+    const questionList = hasQuestionList ? questions : [];
+    const settings = {
+      keepFavorite: true,
+      ...(!hasQuestionList && questions && typeof questions === "object" ? questions : {}),
+      ...(options && typeof options === "object" ? options : {}),
+    };
+
+    questionList.forEach((question) => {
+      if (!question || !question.id) return;
+      const id = String(question.id);
+      const current = getQuestionProgressFrom(progress, id);
+      if (settings.keepFavorite && current.isFavorite === true) {
+        progress.questions[id] = {
+          status: "not_started",
+          mastery: "unknown",
+          isFavorite: true,
+          isWrong: false,
+          reviewCount: 0,
+          lastReviewedAt: null,
+          selectedAnswer: null,
+          isCorrect: null,
+          answeredAt: null,
+          answerCount: 0,
+        };
+      } else {
+        delete progress.questions[id];
+      }
+    });
+
+    if (subjectKey && progress.subjects[subjectKey]) {
+      const nextSubjectProgress = {
+        ...progress.subjects[subjectKey],
+        lastStudyAt: now(),
+      };
+      delete nextSubjectProgress.currentQuestionId;
+      progress.subjects[subjectKey] = nextSubjectProgress;
+    }
+
+    return writeProgress(progress);
   }
 
   function setCurrentQuestion(subjectId, questionId) {
@@ -227,6 +274,7 @@
     toggleFavorite,
     saveQuestionAnswer,
     resetQuestionAnswer,
+    clearSubjectProgress,
     setCurrentQuestion,
     getCurrentQuestion,
     getSubjectStats,
