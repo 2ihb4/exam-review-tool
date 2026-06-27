@@ -23,9 +23,7 @@ const COST_MODULE_TABS = [
   { value: "choice", label: "选择题刷题", module: "choice", description: "点选项后立即判对错。" },
   { value: "term", label: "名词解释", module: "term", description: "先看题，再展开答案和速记。" },
   { value: "short_answer", label: "简答题", module: "short_answer", description: "按题背答案，支持收藏。" },
-  { value: "case", label: "案例分析", module: "case", disabled: true, description: "暂未开放，后续补充。" },
 ];
-
 const seedData = {
   users: [
     {
@@ -325,6 +323,7 @@ let contractReviewIndexByType = {
   short: 0,
 };
 let revealedContractAnswers = new Set();
+let costActiveView = "home";
 let costModuleFilter = "calculation";
 let costFavoriteFilter = "all";
 let costReviewIndexByModule = {
@@ -334,6 +333,7 @@ let costReviewIndexByModule = {
   short_answer: 0,
 };
 let revealedCostAnswers = new Set();
+const expandedCostDirectoryGroups = new Set(["self-organized", "teacher-keypoints"]);
 let isApplyingHistoryState = false;
 let adminQuestionFilters = {
   subject_id: "all",
@@ -1237,6 +1237,10 @@ function escapeHTML(value) {
     .replaceAll("'", "&#039;");
 }
 
+function escapeHtml(value) {
+  return escapeHTML(value);
+}
+
 function getSubject(id) {
   return data.subjects.find((subject) => subject.id === id);
 }
@@ -1842,6 +1846,9 @@ function renderSubject() {
   if (isCostManagementSubject(subject)) {
     focusDrawerId = "";
     focusDrawerEditing = false;
+    if (!["home", "directory", "teacher_materials", "organized_answers"].includes(costActiveView) && !isCostModuleView(costActiveView)) {
+      costActiveView = "home";
+    }
     if (!COST_MODULE_TABS.some((tab) => tab.value === costModuleFilter && !tab.disabled)) {
       costModuleFilter = "calculation";
     }
@@ -2313,6 +2320,10 @@ function costModuleLabel(value) {
   return COST_MODULE_TABS.find((tab) => tab.value === value || tab.module === value)?.label || "工程造价管理";
 }
 
+function isCostModuleView(value) {
+  return COST_MODULE_TABS.some((tab) => tab.value === value && !tab.disabled);
+}
+
 function costModuleQuestions(moduleValue = costModuleFilter) {
   const tab = COST_MODULE_TABS.find((item) => item.value === moduleValue) || COST_MODULE_TABS[0];
   if (tab.disabled) return [];
@@ -2354,6 +2365,84 @@ function costStats(moduleValue) {
 }
 
 function renderCostManagementReview(subject) {
+  if (costActiveView === "directory") costActiveView = "teacher_materials";
+  if (costActiveView === "teacher_materials") return renderCostTeacherMaterials();
+  if (costActiveView === "organized_answers") return renderCostOrganizedAnswers();
+  if (costActiveView === "home") return renderCostHome();
+  if (isCostModuleView(costActiveView)) return renderCostModulePractice(subject);
+  costActiveView = "home";
+  return renderCostHome();
+}
+
+function renderCostHome() {
+  return `
+    <section class="cost-path-section" aria-label="工程造价管理复习路径">
+      <div class="cost-path-header">
+        <p class="eyebrow">复习路径</p>
+        <h2>先选资料来源</h2>
+        <p>可以先看老师课上重点，再进入整理好的答案刷题和背诵。</p>
+      </div>
+      <div class="cost-path-grid">
+      ${renderCostPathCard({
+        title: "上课的复习资料",
+        subtitle: "老师课上重点目录",
+        description: "按章节查看老师划的计算题、名词解释和简答题重点。",
+        badge: "老师重点",
+        icon: "课",
+        actionText: "查看目录 →",
+        tone: "teacher-card",
+        action: "open-cost-teacher-materials",
+      })}
+      ${renderCostPathCard({
+        title: "书本答案 + 课后习题 + AI预测部分习题",
+        subtitle: "整理出来的答案",
+        description: "包含书本答案、课后习题、AI预测部分习题，适合直接刷题和背诵。",
+        badge: "可刷题",
+        icon: "答",
+        actionText: "开始复习 →",
+        tone: "answer-card",
+        action: "open-cost-organized-answers",
+      })}
+      </div>
+    </section>
+  `;
+}
+
+function renderCostPathCard(card) {
+  return `
+    <button class="cost-path-card ${escapeHTML(card.tone || "")}" data-action="${card.action}" type="button">
+      <div class="cost-path-top">
+        <div class="cost-path-icon" aria-hidden="true">${escapeHTML(card.icon || "")}</div>
+        <span class="cost-path-badge">${escapeHTML(card.badge || "")}</span>
+      </div>
+      <div>
+        <h3 class="cost-path-title">${escapeHTML(card.title)}</h3>
+        <p class="cost-path-subtitle">${escapeHTML(card.subtitle)}</p>
+      </div>
+      <p class="cost-path-desc">${escapeHTML(card.description)}</p>
+      <div class="cost-path-action">${escapeHTML(card.actionText || "进入 →")}</div>
+    </button>
+  `;
+}
+
+function renderCostOrganizedAnswers() {
+  return `
+    <section class="cost-subview-panel" aria-label="工程造价管理整理答案模块">
+      <div class="cost-subview-header">
+        <button class="back-link" data-action="back-cost-home" type="button">← 返回工程造价管理</button>
+        <p class="eyebrow">Organized Answers</p>
+        <h2>书本答案 + 课后习题 + AI预测部分习题</h2>
+        <p>包含书本答案、课后习题、AI预测部分习题，适合直接刷题和背诵。</p>
+      </div>
+      <section class="cost-module-grid" aria-label="工程造价管理答案模块入口">
+        ${COST_MODULE_TABS.map((tab) => renderCostModuleCard(tab)).join("")}
+      </section>
+    </section>
+  `;
+}
+
+function renderCostModulePractice(subject) {
+  if (isCostModuleView(costActiveView)) costModuleFilter = costActiveView;
   const allQuestions = costModuleQuestions();
   const questions = visibleCostQuestions();
   const currentQuestionId = reviewProgressService()?.getCurrentQuestion?.(subject.id) || "";
@@ -2365,15 +2454,13 @@ function renderCostManagementReview(subject) {
   );
   costReviewIndexByModule[costModuleFilter] = currentIndex;
   return `
+    <div class="cost-subview-header compact">
+      <button class="back-link" data-action="back-cost-organized-answers" type="button">← 返回整理答案</button>
+      <p class="eyebrow">${escapeHTML(costModuleLabel(costModuleFilter))}</p>
+      <h2>${escapeHTML(costModuleLabel(costModuleFilter))}</h2>
+    </div>
     <section class="cost-module-grid" aria-label="工程造价管理模块入口">
       ${COST_MODULE_TABS.map((tab) => renderCostModuleCard(tab)).join("")}
-    </section>
-    <section class="cost-type-tabs" aria-label="工程造价管理当前模块">
-      ${COST_MODULE_TABS.filter((tab) => !tab.disabled).map((tab) => `
-        <button class="cost-type-tab ${costModuleFilter === tab.value ? "active" : ""}" data-action="cost-module-filter" data-value="${tab.value}" type="button">
-          ${escapeHTML(tab.label)}
-        </button>
-      `).join("")}
     </section>
     <section class="contract-favorite-filter cost-favorite-filter" aria-label="工程造价管理收藏筛选">
       <button class="${costFavoriteFilter === "all" ? "active" : ""}" data-action="cost-favorite-filter" data-value="all" type="button">全部</button>
@@ -2401,11 +2488,135 @@ function renderCostModuleCard(tab) {
         ? `已做 ${stats.done || 0} / ${stats.total} · 收藏 ${stats.favorite || 0}`
         : `${stats.total} 题 · 收藏 ${stats.favorite || 0}`;
   return `
-    <button class="cost-module-card ${tab.disabled ? "disabled" : ""} ${costModuleFilter === tab.value ? "active" : ""}" data-action="${tab.disabled ? "cost-case-disabled" : "cost-module-filter"}" data-value="${tab.value}" type="button" ${tab.disabled ? "aria-disabled=\"true\"" : ""}>
+    <button class="cost-module-card ${isCostModuleView(costActiveView) && costModuleFilter === tab.value ? "active" : ""}" data-action="open-cost-module" data-module="${tab.value}" data-value="${tab.value}" type="button">
       <strong>${escapeHTML(tab.label)}</strong>
       <span>${escapeHTML(statText)}</span>
       <small>${escapeHTML(tab.description || "")}</small>
     </button>
+  `;
+}
+
+function renderCostTeacherMaterials() {
+  const directory = window.COST_REVIEW_DIRECTORY;
+  if (!directory) {
+    return `
+      <div class="empty-state">
+        <h3>上课的复习资料暂未加载</h3>
+        <p>请检查 cost-review-directory-seed.js 是否已正确引入。</p>
+      </div>
+    `;
+  }
+  const teacherSection = directory.sections.find((section) => section.id === "teacher-keypoints");
+  return `
+    <section class="cost-directory-panel" aria-label="工程造价管理上课复习资料">
+      <div class="cost-directory-header">
+        <button class="back-link" data-action="back-cost-home" type="button">← 返回工程造价管理</button>
+        <p class="eyebrow">Teacher Materials</p>
+        <h2>上课的复习资料</h2>
+        <p>根据老师课上画的重点整理，适合对照教材页码复习。</p>
+      </div>
+      ${teacherSection ? renderCostDirectoryTeacherOutline(teacherSection) : ""}
+    </section>
+  `;
+}
+
+function renderCostDirectoryTeacherOutline(section) {
+  return `
+    <section class="cost-directory-section">
+      <div class="cost-directory-section-title static-title">
+        <span>${escapeHTML(section.title || "老师课上重点")}</span>
+      </div>
+      <p class="cost-directory-section-desc">${escapeHTML(section.description || "根据课上老师划的重点整理。")}</p>
+      <div class="cost-directory-groups">
+        ${(section.groups || []).map(renderCostTeacherDirectoryGroup).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderCostDirectorySection(section) {
+  const isExpanded = expandedCostDirectoryGroups.has(section.id);
+  return `
+    <section class="cost-directory-section">
+      <button class="cost-directory-section-title" data-action="toggle-cost-directory-group" data-id="${escapeHTML(section.id)}" type="button" aria-expanded="${isExpanded ? "true" : "false"}">
+        <span>${escapeHTML(section.title)}</span>
+        <small>${isExpanded ? "收起" : "展开"}</small>
+      </button>
+      <p class="cost-directory-section-desc">${escapeHTML(section.description || "")}</p>
+      ${isExpanded ? renderCostDirectorySectionBody(section) : ""}
+    </section>
+  `;
+}
+
+function renderCostDirectorySectionBody(section) {
+  if (section.type === "module-list") {
+    return `
+      <div class="cost-directory-list">
+        ${(section.items || []).map(renderCostModuleDirectoryItem).join("")}
+      </div>
+    `;
+  }
+  if (section.type === "teacher-outline") {
+    return `
+      <div class="cost-directory-groups">
+        ${(section.groups || []).map(renderCostTeacherDirectoryGroup).join("")}
+      </div>
+    `;
+  }
+  return "";
+}
+
+function renderCostModuleDirectoryItem(item) {
+  const disabled = item.status === "disabled";
+  return `
+    <article class="cost-directory-item ${disabled ? "cost-directory-disabled" : ""}">
+      <div>
+        <h3 class="cost-directory-item-title">${escapeHTML(item.title)}</h3>
+        <p>${escapeHTML(item.description || "")}</p>
+      </div>
+      <div class="cost-directory-item-meta">
+        <span class="cost-directory-chip">${escapeHTML(item.countText || "")}</span>
+        ${disabled
+          ? `<span class="cost-directory-chip">暂未开放</span>`
+          : `<button class="cost-directory-related-button" data-action="open-cost-module" data-module="${escapeHTML(item.module || "")}" type="button">去复习</button>`}
+      </div>
+    </article>
+  `;
+}
+
+function renderCostTeacherDirectoryGroup(group) {
+  const isExpanded = expandedCostDirectoryGroups.has(group.id);
+  return `
+    <section class="cost-directory-group">
+      <button class="cost-directory-group-header" data-action="toggle-cost-directory-group" data-id="${escapeHTML(group.id)}" type="button" aria-expanded="${isExpanded ? "true" : "false"}">
+        <span class="cost-directory-group-title">${escapeHTML(group.title)}</span>
+        <span class="cost-directory-group-toggle">${isExpanded ? "收起" : "展开"}</span>
+      </button>
+      <p class="cost-directory-section-desc">${escapeHTML(group.description || "")}</p>
+      ${isExpanded ? `<div class="cost-directory-list">${(group.items || []).map(renderCostTeacherDirectoryItem).join("")}</div>` : ""}
+    </section>
+  `;
+}
+
+function renderCostTeacherDirectoryItem(item) {
+  return `
+    <article class="cost-directory-item">
+      <div>
+        <div class="cost-directory-item-title">
+          ${item.chapter ? `<span class="cost-directory-chip">${escapeHTML(item.chapter)}</span>` : ""}
+          <span>${escapeHTML(item.title)}</span>
+          ${item.page ? `<span class="cost-directory-page">${escapeHTML(item.page)}</span>` : ""}
+        </div>
+        ${item.children?.length ? `
+          <ul class="cost-directory-children">
+            ${item.children.map((child) => `<li>${escapeHTML(child)}</li>`).join("")}
+          </ul>
+        ` : ""}
+      </div>
+      ${item.relatedModule ? `
+        <button class="cost-directory-related-button" data-action="open-cost-module" data-module="${escapeHTML(item.relatedModule)}" type="button">去复习</button>
+      ` : ""}
+    </article>
   `;
 }
 
@@ -2491,6 +2702,7 @@ function renderCostChoiceCard(question, index, total) {
 function renderCostCalculationCard(question, index, total) {
   const progress = questionProgress(question.id);
   const isFavorite = progress.isFavorite === true;
+  const hasAnswer = question.standard_steps?.length || question.standard_answer || question.correct_answer;
   return `
     <article class="quiz-card cost-question-card cost-calculation-card">
       <div class="quiz-progress">
@@ -2509,17 +2721,16 @@ function renderCostCalculationCard(question, index, total) {
         <h3>题目</h3>
         <p>${escapeHTML(question.problem_text || question.question_content || question.title)}</p>
       </section>
+      <section class="cost-answer-panel cost-step-panel">
+        <h3>标准答案 / 解题步骤</h3>
+        ${hasAnswer ? renderCostCalculationSteps(question) : `<p>原文未提供完整答案。</p>`}
+      </section>
       ${question.formula || question.formulaHtml ? `
-        <section class="cost-answer-panel">
+        <section class="cost-answer-panel cost-formula-panel">
           <h3>公式</h3>
-          <p class="calc-ai-formula">${renderFormula(question)}</p>
+          <div class="calc-ai-formula cost-formula-text">${renderCostFormula(question)}</div>
         </section>
       ` : ""}
-      <section class="cost-answer-panel">
-        <h3>标准答案 / 解题步骤</h3>
-        ${question.standard_steps?.length ? renderFocusArray(question.standard_steps, true) : ""}
-        ${question.standard_answer || question.correct_answer ? `<p>${escapeHTML(question.standard_answer || question.correct_answer)}</p>` : `<p>原文未提供完整答案。</p>`}
-      </section>
       ${question.solution_idea ? `
         <section class="cost-answer-panel">
           <h3>解题思路</h3>
@@ -2569,6 +2780,164 @@ function renderCostRevealCard(question, index, total) {
         <button class="primary-button" data-action="cost-next-question" ${index < total - 1 ? "" : "disabled"} type="button">下一题</button>
       </div>
     </article>
+  `;
+}
+
+function cleanCostStepText(value) {
+  return normalizeCostStepText(value).lines.map((line) => line.text).join("\n");
+}
+
+const COST_EQUATION_LABELS = [
+  "专用工具费",
+  "废品损失费",
+  "包装费",
+  "利润",
+  "销项税额",
+  "关税",
+  "增值税",
+  "进口环节增值税",
+  "外贸手续费",
+  "银行财务费",
+  "运输保险费",
+  "基本预备费",
+  "价差预备费",
+  "建设期贷款利息",
+  "起扣点",
+  "工程预付款",
+  "应扣预付款",
+  "进度款",
+  "投资偏差",
+  "进度偏差",
+  "合同价款",
+  "起扣控制额",
+  "每月扣回",
+  "静态投资",
+  "建设期每年投资",
+];
+
+function normalizeCostEquationLabel(label) {
+  return String(label || "").replace(/\s+/g, "");
+}
+
+function stripCostStepPrefix(text) {
+  return String(text || "")
+    .replace(/^\s*(计算|计算一|计算二|计算三|示例答案|答案)[:：]\s*/g, "")
+    .trim();
+}
+
+function normalizeCostEquationLine(text) {
+  let line = stripCostStepPrefix(text)
+    .replace(/\s+/g, " ")
+    .replace(/\s*=\s*/g, "=")
+    .replace(/\s*[:：]\s*/g, "：")
+    .replace(/(^|[；;。\n])\s*(计算一|计算二|计算三|计算|示例答案|答案)[:：]\s*/g, "$1")
+    .trim();
+
+  COST_EQUATION_LABELS.forEach((label) => {
+    const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    line = line
+      .replace(new RegExp(`(^|[；;。\\n])\\s*${escaped}\\s*=\\s*`, "g"), `$1${label}：`)
+      .replace(new RegExp(`(^|[；;。\\n])\\s*${escaped}\\s*[:：]\\s*`, "g"), `$1${label}：`);
+  });
+
+  return line
+    .replace(/答案[:：]\s*/g, "")
+    .replace(/\s*；\s*/g, "；")
+    .replace(/\s*。\s*/g, "。")
+    .trim();
+}
+
+function splitCostStepLines(value) {
+  const normalized = normalizeCostEquationLine(value);
+  if (!normalized) return [];
+  return normalized
+    .split(/(?<=[；。])\s*/u)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => line.replace(/；$/u, "；").replace(/。$/u, "。"));
+}
+
+function normalizeCostStepText(value) {
+  const rawLines = Array.isArray(value) ? value : splitCostStepLines(value);
+  const lines = rawLines.map((rawLine) => {
+    const text = normalizeCostEquationLine(rawLine);
+    const match = text.match(/^([^：:]{1,18})[:：](.+)$/u);
+    if (!match) return { label: "", expression: "", text };
+    const label = match[1].trim();
+    const expression = match[2].trim();
+    const knownLabel = COST_EQUATION_LABELS.some((item) => normalizeCostEquationLabel(item) === normalizeCostEquationLabel(label));
+    if (!knownLabel && !/^[A-Za-z0-9Δ_]+$/.test(label)) return { label: "", expression: "", text };
+    return { label, expression, text: `${label}：${expression}` };
+  }).filter((line) => line.text);
+  return { lines };
+}
+
+function cleanCostFinalAnswer(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  return text
+    .split(/\n+/)
+    .map((line) => line.replace(/^\s*答案[:：]\s*/g, "").trim())
+    .filter(Boolean)
+    .join("\n");
+}
+
+function normalizeCostFlowCompare(text) {
+  return String(text || "")
+    .replace(/\s+/g, "")
+    .replace(/[；;。.]$/u, "");
+}
+
+function buildCostCalculationFlowLines(question) {
+  const rawSteps = Array.isArray(question.standard_steps)
+    ? question.standard_steps
+    : Array.isArray(question.steps)
+      ? question.steps
+      : [];
+  const stepLines = rawSteps
+    .flatMap((step) => normalizeCostStepText(step).lines)
+    .filter((line) => line.text);
+  const seen = new Set(stepLines.map((line) => normalizeCostFlowCompare(line.text)));
+  const finalLines = cleanCostFinalAnswer(question.standard_answer || question.correct_answer || "")
+    .split(/\n+/)
+    .map((line) => normalizeCostEquationLine(line))
+    .filter(Boolean)
+    .map((text) => ({ label: "", expression: "", text, isFinal: true }))
+    .filter((line) => {
+      const key = normalizeCostFlowCompare(line.text);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  return [...stepLines, ...finalLines];
+}
+
+function renderCostCalculationSteps(question) {
+  const flowLines = buildCostCalculationFlowLines(question);
+  if (!flowLines.length) return `<p>原文未提供完整答案。</p>`;
+  return `
+    <div class="calc-answer-flow">
+      ${flowLines.map((line, index) => renderCostFlowLine(line, index)).join("")}
+    </div>
+  `;
+}
+
+function renderCostFlowLine(line, index) {
+  const finalClass = line.isFinal ? " calc-flow-final calc-final-answer" : "";
+  return `
+    <div class="calc-flow-line${finalClass}">
+      <span class="calc-flow-index">${index + 1}.</span>
+      <span class="calc-flow-content">${renderCostFlowContent(line)}</span>
+    </div>
+  `;
+}
+
+function renderCostFlowContent(line) {
+  if (!line.label) {
+    return escapeHTML(line.text);
+  }
+  return `
+    <span class="calc-flow-label">${escapeHTML(line.label)}：</span><span class="calc-flow-expression">${escapeHTML(line.expression)}</span>
   `;
 }
 
@@ -2801,13 +3170,48 @@ function trustedFormulaHtml(question) {
   return escapeHTML(question.formulaHtml)
     .replace(/&lt;br\s*\/?&gt;/gi, "<br>")
     .replace(/&lt;sub&gt;/gi, "<sub>")
-    .replace(/&lt;\/sub&gt;/gi, "</sub>");
+    .replace(/&lt;\/sub&gt;/gi, "</sub>")
+    .replace(/&lt;sup&gt;/gi, "<sup>")
+    .replace(/&lt;\/sup&gt;/gi, "</sup>");
+}
+
+function formatCostFormulaText(value) {
+  if (!value) return "";
+
+  let text = escapeHtml(String(value));
+
+  text = text
+    .replace(/\^\(([^)]+)\)/g, "<sup>$1</sup>")
+    .replace(/\^([A-Za-z0-9.]+)/g, "<sup>$1</sup>")
+    .replace(/Pj-1/g, "P<sub>j-1</sub>")
+    .replace(/Aj/g, "A<sub>j</sub>")
+    .replace(/qj/g, "q<sub>j</sub>")
+    .replace(/It/g, "I<sub>t</sub>")
+    .replace(/Q0/g, "Q<sub>0</sub>")
+    .replace(/Q1/g, "Q<sub>1</sub>")
+    .replace(/Q2/g, "Q<sub>2</sub>")
+    .replace(/P0/g, "P<sub>0</sub>")
+    .replace(/P1/g, "P<sub>1</sub>")
+    .replace(/P2/g, "P<sub>2</sub>");
+
+  return text;
 }
 
 function renderFormula(question) {
   const formulaHtml = trustedFormulaHtml(question);
   if (formulaHtml) return formulaHtml;
   return escapeHTML(question.formula || "");
+}
+
+function renderCostFormula(question) {
+  const formulaHtml = trustedFormulaHtml(question);
+  if (formulaHtml) return formulaHtml;
+  if (Array.isArray(question.formula)) {
+    return question.formula.map((line) => `
+      <div class="calc-formula-line">${formatCostFormulaText(line)}</div>
+    `).join("");
+  }
+  return `<div class="calc-formula-box">${formatCostFormulaText(question.formula || "")}</div>`;
 }
 
 function renderCalculationSourceImages(question) {
@@ -4508,6 +4912,7 @@ document.addEventListener("click", async (event) => {
     session.lastAiAnswer = "";
     session.currentSubjectId = currentSubjectId;
     focusDrawerId = "";
+    if (currentSubjectId === COST_MANAGEMENT_SUBJECT_ID) costActiveView = "home";
     saveSession();
     recordSubjectVisit(currentSubjectId);
     renderSubject();
@@ -4610,10 +5015,36 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
-  if (action === "cost-module-filter") {
-    const nextModule = button.dataset.value;
+  if (action === "back-cost-home") {
+    costActiveView = "home";
+    renderSubject();
+    return;
+  }
+
+  if (action === "open-cost-teacher-materials" || action === "open-cost-directory") {
+    costActiveView = "teacher_materials";
+    renderSubject();
+    return;
+  }
+
+  if (action === "open-cost-organized-answers") {
+    costActiveView = "organized_answers";
+    renderSubject();
+    return;
+  }
+
+  if (action === "back-cost-organized-answers") {
+    costActiveView = "organized_answers";
+    renderSubject();
+    return;
+  }
+
+  if (action === "open-cost-module" || action === "cost-module-filter") {
+    const nextModule = button.dataset.module || button.dataset.value;
+    if (!nextModule) return;
     if (COST_MODULE_TABS.some((tab) => tab.value === nextModule && !tab.disabled)) {
       costModuleFilter = nextModule;
+      costActiveView = nextModule;
       costFavoriteFilter = "all";
       costReviewIndexByModule[costModuleFilter] = 0;
       session.costModuleFilter = costModuleFilter;
@@ -4623,8 +5054,13 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
-  if (action === "cost-case-disabled") {
-    toast("案例分析资料暂未导入。");
+  if (action === "toggle-cost-directory-group") {
+    const id = button.dataset.id;
+    if (!id) return;
+    expandedCostDirectoryGroups.has(id)
+      ? expandedCostDirectoryGroups.delete(id)
+      : expandedCostDirectoryGroups.add(id);
+    renderSubject();
     return;
   }
 
@@ -4739,12 +5175,12 @@ document.addEventListener("click", async (event) => {
   if (action === "back-home") {
     session.admin = false;
     saveSession();
-    if (currentView !== "home" && window.history.length > 1) {
-      window.history.back();
-      return;
-    }
+    resetFocusState();
+    focusDrawerId = "";
+    focusDrawerEditing = false;
     showHomeView();
     replaceAppState("back-home");
+    return;
   }
 
   if (action === "set-tab") {
