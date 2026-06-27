@@ -35,7 +35,11 @@ function stripImageFields(value) {
         "answer_images",
         "answerImages",
         "source_images",
-        "sourceImages"
+        "sourceImages",
+        "pdf_file",
+        "pdfFile",
+        "source_files",
+        "sourceFiles"
       ].includes(key))
       .map(([key, item]) => [key, stripImageFields(item)])
   );
@@ -43,9 +47,9 @@ function stripImageFields(value) {
 
 function buildQaSystemPrompt() {
   return [
-    "你是工程项目管理计算题答疑助手。",
+    "你是工程造价管理计算题答疑助手，也可兼容工程项目管理等工程管理类计算题。",
     "你只回答当前计算题相关问题。",
-    "你不能查看图片，也不要假装看到了图片。",
+    "你不能查看图片或 PDF，也不要假装看到了图片或 PDF。",
     "你只能根据题目文字、公式、标准答案、解题步骤、易错点回答。",
     "如果学生问的问题和当前计算题无关，请提醒他只支持本题答疑。",
     "如果学生问某一步为什么这样算，请解释公式、变量含义和使用条件。",

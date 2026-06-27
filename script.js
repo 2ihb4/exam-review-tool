@@ -17,6 +17,14 @@ const CONTRACT_TYPE_TABS = [
   { value: "blank", label: "填空题", questionType: "填空题" },
   { value: "short", label: "简答题", questionType: "简答题" },
 ];
+const COST_MANAGEMENT_SUBJECT_ID = "s-hr";
+const COST_MODULE_TABS = [
+  { value: "calculation", label: "计算题重点", module: "calculation", description: "公式、例题和答案直接看，不懂再问 AI。" },
+  { value: "choice", label: "选择题刷题", module: "choice", description: "点选项后立即判对错。" },
+  { value: "term", label: "名词解释", module: "term", description: "先看题，再展开答案和速记。" },
+  { value: "short_answer", label: "简答题", module: "short_answer", description: "按题背答案，支持收藏。" },
+  { value: "case", label: "案例分析", module: "case", disabled: true, description: "暂未开放，后续补充。" },
+];
 
 const seedData = {
   users: [
@@ -317,6 +325,15 @@ let contractReviewIndexByType = {
   short: 0,
 };
 let revealedContractAnswers = new Set();
+let costModuleFilter = "calculation";
+let costFavoriteFilter = "all";
+let costReviewIndexByModule = {
+  calculation: 0,
+  choice: 0,
+  term: 0,
+  short_answer: 0,
+};
+let revealedCostAnswers = new Set();
 let isApplyingHistoryState = false;
 let adminQuestionFilters = {
   subject_id: "all",
@@ -668,6 +685,12 @@ function migrateData(current) {
     });
   }
   syncContractManagementQuestions(current, window.ContractManagementQuestionSeed || []);
+  syncCostManagementQuestions(current, [
+    ...(window.CostCalculationSeed || []),
+    ...(window.CostChoiceSeed || []),
+    ...(window.CostTermSeed || []),
+    ...(window.CostShortAnswerSeed || []),
+  ]);
   if (!current.meta?.cost_directory_seeded_v1) {
     const existingPointIds = new Set(current.key_points.map((point) => point.id));
     const costPoints = costManagementDirectory.map(([chapter, sequence, title, page_range], index) => {
@@ -742,6 +765,54 @@ function syncContractManagementQuestions(current, seeds = []) {
     }
     current.__needsSave = true;
   });
+}
+
+function syncCostManagementQuestions(current, seeds = []) {
+  if (!Array.isArray(seeds) || !seeds.length) return;
+  seeds.forEach((seed) => {
+    if (!seed?.id) return;
+    const complete = seed.incomplete !== true;
+    const imported = normalizeQuestion({
+      ...seed,
+      subject: "工程造价管理",
+      subjectId: "cost-management",
+      subject_id: COST_MANAGEMENT_SUBJECT_ID,
+      chapter: seed.chapter || costModuleLabel(seed.module || "calculation"),
+      question_content: seed.question_content || seed.problem_text || seed.title,
+      title: seed.title || seed.question_content,
+      correct_answer: seed.correct_answer || seed.standard_answer || "",
+      source: seed.source || "工程造价管理复习资料",
+      source_status: seed.source_status || (complete ? "已有书本来源" : "资料不完整"),
+      memory_tip: seed.memory_tip || "",
+      difficulty: seed.difficulty || "medium",
+      importance: seed.importance || (seed.is_key ? "high" : "medium"),
+      prediction_level: seed.prediction_level || (seed.is_key ? "high" : "medium"),
+      is_final_focus: true,
+      is_prediction: seed.module === "choice",
+      is_self_test: seed.module === "choice",
+      is_ai_knowledge: seed.is_calculation === true || seed.module === "calculation",
+      is_public: seed.is_public !== false,
+      status: seed.status || "published",
+      created_by: "u-admin",
+      created_at: seed.created_at || today(),
+      updated_at: today(),
+    });
+    const existing = current.questions.find((question) =>
+      question.subject_id === COST_MANAGEMENT_SUBJECT_ID &&
+      (question.id === imported.id || (question.module === imported.module && question.order === imported.order && question.title === imported.title))
+    );
+    if (existing) {
+      const keepCreatedAt = existing.created_at || imported.created_at;
+      Object.assign(existing, imported, { created_at: keepCreatedAt });
+    } else {
+      current.questions.push(imported);
+    }
+    current.__needsSave = true;
+  });
+  current.meta = {
+    ...(current.meta || {}),
+    cost_management_questions_imported_v1: true,
+  };
 }
 
 function syncEngineeringFocusQuestions(current, seeds = []) {
@@ -898,6 +969,7 @@ function normalizeQuestion(question) {
     subject: question.subject || "",
     subjectId: question.subjectId || "",
     subject_id: question.subject_id || "s-management",
+    module: question.module || "",
     chapter: question.chapter || findChapterFromPointIds(question.key_point_ids || question.related_key_point_ids || []),
     key_point_ids: question.key_point_ids || question.related_key_point_ids || [],
     question_type: question.question_type || "简答题",
@@ -911,9 +983,12 @@ function normalizeQuestion(question) {
     source_status: question.source_status || "已有书本来源",
     tags: Array.isArray(question.tags) ? question.tags : [],
     memory_tip: question.memory_tip || question.mnemonic || question.tip || "",
+    source_page: question.source_page || question.sourcePage || "",
+    incomplete: question.incomplete === true,
     mastery_status: question.mastery_status || "未开始",
     note: question.note || "",
     is_calculation: question.is_calculation === true || String(question.question_type || "").includes("计算题"),
+    is_key: question.is_key === true || question.isKey === true,
     calculation_type: question.calculation_type || "",
     problem_text: question.problem_text || question.questionText || question.question_content || question.title || "",
     formula: question.formula || "",
@@ -1764,6 +1839,19 @@ function renderSubject() {
     focusDrawerId = "";
     focusDrawerEditing = false;
   }
+  if (isCostManagementSubject(subject)) {
+    focusDrawerId = "";
+    focusDrawerEditing = false;
+    if (!COST_MODULE_TABS.some((tab) => tab.value === costModuleFilter && !tab.disabled)) {
+      costModuleFilter = "calculation";
+    }
+    if (
+      session.costModuleFilter &&
+      COST_MODULE_TABS.some((tab) => tab.value === session.costModuleFilter && !tab.disabled)
+    ) {
+      costModuleFilter = session.costModuleFilter;
+    }
+  }
 
   $("#subjectView").innerHTML = `
     <div class="subject-workspace">
@@ -1780,13 +1868,18 @@ function renderSubject() {
       </div>
 
       <section class="content-panel">
-        ${isContractManagementSubject(subject) ? renderContractManagementReview(subject) : renderPoints(subject)}
+        ${isCostManagementSubject(subject)
+          ? renderCostManagementReview(subject)
+          : isContractManagementSubject(subject)
+            ? renderContractManagementReview(subject)
+            : renderPoints(subject)}
         ${isProjectManagementSubject(subject) ? `<div data-calc-ai-root></div>` : ""}
       </section>
     </div>
   `;
   if (currentView === "subject") renderCalcAiForCurrentSubject();
   if (isContractManagementSubject(subject)) requestAnimationFrame(setupContractSwipe);
+  if (isCostManagementSubject(subject)) requestAnimationFrame(setupCostSwipe);
   if (focusDrawerId) requestAnimationFrame(setupFocusDetailSwipe);
 }
 
@@ -1796,6 +1889,10 @@ function isProjectManagementSubject(subject) {
 
 function isContractManagementSubject(subject) {
   return Boolean(subject && (subject.id === CONTRACT_MANAGEMENT_SUBJECT_ID || subject.name === "工程合同管理"));
+}
+
+function isCostManagementSubject(subject) {
+  return Boolean(subject && (subject.id === COST_MANAGEMENT_SUBJECT_ID || subject.name === "工程造价管理"));
 }
 
 function renderCalcAiForCurrentSubject() {
@@ -2210,6 +2307,419 @@ function saveContractQuestionAnswer(question, answer) {
   }
   service?.setCurrentQuestion?.(question.subject_id, question.id);
   return isCorrect;
+}
+
+function costModuleLabel(value) {
+  return COST_MODULE_TABS.find((tab) => tab.value === value || tab.module === value)?.label || "工程造价管理";
+}
+
+function costModuleQuestions(moduleValue = costModuleFilter) {
+  const tab = COST_MODULE_TABS.find((item) => item.value === moduleValue) || COST_MODULE_TABS[0];
+  if (tab.disabled) return [];
+  return finalFocusQuestions(COST_MANAGEMENT_SUBJECT_ID)
+    .filter((question) => (question.module || "") === tab.module)
+    .sort((a, b) => {
+      if (tab.value === "calculation") {
+        const keyDiff = Number(b.is_key === true) - Number(a.is_key === true);
+        if (keyDiff !== 0) return keyDiff;
+      }
+      return Number(a.order || 0) - Number(b.order || 0);
+    });
+}
+
+function visibleCostQuestions(moduleValue = costModuleFilter) {
+  const questions = costModuleQuestions(moduleValue);
+  return costFavoriteFilter === "favorite"
+    ? questions.filter((question) => questionProgress(question.id).isFavorite)
+    : questions;
+}
+
+function costStats(moduleValue) {
+  const questions = costModuleQuestions(moduleValue);
+  const favorite = questions.filter((question) => questionProgress(question.id).isFavorite).length;
+  if (moduleValue === "choice") {
+    const done = questions.filter((question) => questionProgress(question.id).selectedAnswer).length;
+    const correct = questions.filter((question) => questionProgress(question.id).isCorrect === true).length;
+    return { total: questions.length, favorite, done, correct, wrong: Math.max(0, done - correct) };
+  }
+  if (moduleValue === "calculation") {
+    return {
+      total: questions.length,
+      favorite,
+      key: questions.filter((question) => question.is_key === true).length,
+      incomplete: questions.filter((question) => question.incomplete === true).length,
+    };
+  }
+  return { total: questions.length, favorite, done: 0, correct: 0, wrong: 0 };
+}
+
+function renderCostManagementReview(subject) {
+  const allQuestions = costModuleQuestions();
+  const questions = visibleCostQuestions();
+  const currentQuestionId = reviewProgressService()?.getCurrentQuestion?.(subject.id) || "";
+  const savedQuestionIndex = questions.findIndex((question) => question.id === currentQuestionId);
+  if (savedQuestionIndex >= 0) costReviewIndexByModule[costModuleFilter] = savedQuestionIndex;
+  const currentIndex = Math.max(
+    0,
+    Math.min(questions.length - 1, Number(costReviewIndexByModule[costModuleFilter] || 0))
+  );
+  costReviewIndexByModule[costModuleFilter] = currentIndex;
+  return `
+    <section class="cost-module-grid" aria-label="工程造价管理模块入口">
+      ${COST_MODULE_TABS.map((tab) => renderCostModuleCard(tab)).join("")}
+    </section>
+    <section class="cost-type-tabs" aria-label="工程造价管理当前模块">
+      ${COST_MODULE_TABS.filter((tab) => !tab.disabled).map((tab) => `
+        <button class="cost-type-tab ${costModuleFilter === tab.value ? "active" : ""}" data-action="cost-module-filter" data-value="${tab.value}" type="button">
+          ${escapeHTML(tab.label)}
+        </button>
+      `).join("")}
+    </section>
+    <section class="contract-favorite-filter cost-favorite-filter" aria-label="工程造价管理收藏筛选">
+      <button class="${costFavoriteFilter === "all" ? "active" : ""}" data-action="cost-favorite-filter" data-value="all" type="button">全部</button>
+      <button class="${costFavoriteFilter === "favorite" ? "active" : ""}" data-action="cost-favorite-filter" data-value="favorite" type="button">已收藏</button>
+    </section>
+    <section class="subject-progress-tools" aria-label="当前科目做题记录操作">
+      <button class="clear-progress-button danger-outline-button" data-action="clear-subject-progress" type="button">清空做题记录</button>
+      <span>仅清空当前科目的作答记录，收藏会保留。</span>
+    </section>
+    <div class="cost-practice-area" data-cost-swipe-area>
+      ${questions.length
+        ? `${renderCostQuestionCard(questions[currentIndex], currentIndex, questions.length)}${renderCostSwipeHint()}`
+        : renderCostEmptyState(allQuestions.length)}
+    </div>
+  `;
+}
+
+function renderCostModuleCard(tab) {
+  const stats = costStats(tab.value);
+  const statText = tab.disabled
+    ? "暂未开放，后续补充"
+    : tab.value === "calculation"
+      ? `${stats.total} 题 · 重点 ${stats.key || 0} · 收藏 ${stats.favorite || 0}`
+      : tab.value === "choice"
+        ? `已做 ${stats.done || 0} / ${stats.total} · 收藏 ${stats.favorite || 0}`
+        : `${stats.total} 题 · 收藏 ${stats.favorite || 0}`;
+  return `
+    <button class="cost-module-card ${tab.disabled ? "disabled" : ""} ${costModuleFilter === tab.value ? "active" : ""}" data-action="${tab.disabled ? "cost-case-disabled" : "cost-module-filter"}" data-value="${tab.value}" type="button" ${tab.disabled ? "aria-disabled=\"true\"" : ""}>
+      <strong>${escapeHTML(tab.label)}</strong>
+      <span>${escapeHTML(statText)}</span>
+      <small>${escapeHTML(tab.description || "")}</small>
+    </button>
+  `;
+}
+
+function renderCostSwipeHint() {
+  const revealHint = costModuleFilter === "term" || costModuleFilter === "short_answer"
+    ? `<span>点击卡片显示答案和速记</span>`
+    : "";
+  return `
+    <p class="contract-swipe-hint cost-swipe-hint">
+      <span>左右滑动切换题目</span>
+      ${revealHint}
+    </p>
+  `;
+}
+
+function renderCostEmptyState(totalQuestions) {
+  if (costFavoriteFilter === "favorite" && totalQuestions > 0) {
+    return `
+      <div class="empty-state">
+        <h3>暂无收藏题目。</h3>
+        <p>遇到不确定或想考前重点复习的题，可以点击收藏。</p>
+      </div>
+    `;
+  }
+  return `<div class="empty-state"><h3>当前模块暂无题目</h3><p>请检查工程造价管理题库是否已导入。</p></div>`;
+}
+
+function renderCostQuestionCard(question, index, total) {
+  if (costModuleFilter === "choice") return renderCostChoiceCard(question, index, total);
+  if (costModuleFilter === "calculation") return renderCostCalculationCard(question, index, total);
+  return renderCostRevealCard(question, index, total);
+}
+
+function renderCostChoiceCard(question, index, total) {
+  const progress = questionProgress(question.id);
+  const isFavorite = progress.isFavorite === true;
+  const selectedAnswer = progress.selectedAnswer ? normalizeAnswerKey(progress.selectedAnswer) : "";
+  const correctAnswer = normalizeAnswerKey(question.correct_answer);
+  const hasAnswered = Boolean(selectedAnswer);
+  const isCorrect = hasAnswered && selectedAnswer === correctAnswer;
+  const feedbackText = !hasAnswered
+    ? "选择一个选项后，会立即显示对错。"
+    : isCorrect
+      ? "回答正确"
+      : `回答错误，正确答案是 ${displayCorrectAnswer(question)}`;
+  return `
+    <article class="quiz-card cost-question-card cost-choice-card">
+      <div class="quiz-progress">
+        <span>选择题 ${index + 1} / ${total}</span>
+        <span>${hasAnswered ? (isCorrect ? "已做 · 正确" : "已做 · 错误") : "未作答"}</span>
+      </div>
+      <div class="quiz-title-row">
+        <h2>${escapeHTML(question.title || question.question_content)}</h2>
+        ${renderCostFavoriteButton(question, isFavorite)}
+      </div>
+      <div class="quiz-options">
+        ${normalizeOptions(question.options).map((option) => {
+          const key = optionKey(option);
+          const classNames = ["quiz-option", "cost-choice-option"];
+          if (hasAnswered && key === selectedAnswer) classNames.push("selected");
+          if (hasAnswered && key === correctAnswer) classNames.push("correct");
+          if (hasAnswered && key === selectedAnswer && key !== correctAnswer) classNames.push("wrong");
+          return `
+            <button class="${classNames.join(" ")}" data-action="cost-answer-option" data-question-id="${question.id}" data-answer="${escapeHTML(key)}" ${hasAnswered ? "disabled" : ""} type="button">
+              <span>${escapeHTML(optionLabel(option))}</span>
+            </button>
+          `;
+        }).join("")}
+      </div>
+      <div class="quiz-feedback ${hasAnswered ? (isCorrect ? "correct" : "wrong") : ""}">
+        ${escapeHTML(feedbackText)}
+      </div>
+      ${hasAnswered ? renderCostAnswerBlocks(question, true) : ""}
+      <div class="quiz-footer">
+        <button class="small-button" data-action="cost-prev-question" ${index > 0 ? "" : "disabled"} type="button">上一题</button>
+        <button class="small-button" data-action="cost-reset-answer" data-question-id="${question.id}" ${hasAnswered ? "" : "disabled"} type="button">重新选择</button>
+        <button class="primary-button" data-action="cost-next-question" ${index < total - 1 ? "" : "disabled"} type="button">下一题</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderCostCalculationCard(question, index, total) {
+  const progress = questionProgress(question.id);
+  const isFavorite = progress.isFavorite === true;
+  return `
+    <article class="quiz-card cost-question-card cost-calculation-card">
+      <div class="quiz-progress">
+        <span>计算题 ${index + 1} / ${total}</span>
+        <span>${question.is_key ? "重点" : "普通计算题"}</span>
+      </div>
+      <div class="quiz-title-row">
+        <h2>
+          ${question.is_key ? `<span class="cost-key-badge">重点</span>` : ""}
+          ${question.incomplete ? `<span class="pill orange">资料不完整</span>` : ""}
+          ${escapeHTML(question.title || question.question_content)}
+        </h2>
+        ${renderCostFavoriteButton(question, isFavorite)}
+      </div>
+      <section class="cost-answer-panel">
+        <h3>题目</h3>
+        <p>${escapeHTML(question.problem_text || question.question_content || question.title)}</p>
+      </section>
+      ${question.formula || question.formulaHtml ? `
+        <section class="cost-answer-panel">
+          <h3>公式</h3>
+          <p class="calc-ai-formula">${renderFormula(question)}</p>
+        </section>
+      ` : ""}
+      <section class="cost-answer-panel">
+        <h3>标准答案 / 解题步骤</h3>
+        ${question.standard_steps?.length ? renderFocusArray(question.standard_steps, true) : ""}
+        ${question.standard_answer || question.correct_answer ? `<p>${escapeHTML(question.standard_answer || question.correct_answer)}</p>` : `<p>原文未提供完整答案。</p>`}
+      </section>
+      ${question.solution_idea ? `
+        <section class="cost-answer-panel">
+          <h3>解题思路</h3>
+          <p>${escapeHTML(question.solution_idea)}</p>
+        </section>
+      ` : ""}
+      <section class="cost-answer-panel cost-common-mistakes">
+        <h3>易错点</h3>
+        ${question.common_mistakes?.length ? renderFocusArray(question.common_mistakes) : `<p>原文未单独提供易错点。</p>`}
+      </section>
+      ${question.memory_tip ? `
+        <section class="cost-memory-tip">
+          <h3>速记</h3>
+          <p>${escapeHTML(question.memory_tip)}</p>
+        </section>
+      ` : ""}
+      ${renderCostAiChat(question)}
+      <div class="quiz-footer">
+        <button class="small-button" data-action="cost-prev-question" ${index > 0 ? "" : "disabled"} type="button">上一题</button>
+        <span>${index + 1} / ${total}</span>
+        <button class="primary-button" data-action="cost-next-question" ${index < total - 1 ? "" : "disabled"} type="button">下一题</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderCostRevealCard(question, index, total) {
+  const progress = questionProgress(question.id);
+  const isFavorite = progress.isFavorite === true;
+  const isRevealed = revealedCostAnswers.has(question.id);
+  return `
+    <article class="quiz-card answer-reveal-card cost-question-card cost-reveal-card" data-action="toggle-cost-answer" data-id="${question.id}" tabindex="0" aria-expanded="${isRevealed ? "true" : "false"}">
+      <div class="quiz-progress">
+        <span>${escapeHTML(question.question_type)} ${index + 1} / ${total}</span>
+        <span>${isFavorite ? "已收藏" : "未收藏"}</span>
+      </div>
+      <h2>${escapeHTML(question.title || question.question_content)}</h2>
+      ${question.source_page ? `<p class="cost-source-page">来源页码：${escapeHTML(question.source_page)}</p>` : ""}
+      <div class="reveal-actions">
+        <button class="primary-button" data-action="toggle-cost-answer" data-id="${question.id}" type="button">${isRevealed ? "收起答案" : "查看答案"}</button>
+        ${renderCostFavoriteButton(question, isFavorite)}
+      </div>
+      ${isRevealed ? renderCostAnswerBlocks(question, false) : ""}
+      <div class="quiz-footer">
+        <button class="small-button" data-action="cost-prev-question" ${index > 0 ? "" : "disabled"} type="button">上一题</button>
+        <span>${index + 1} / ${total}</span>
+        <button class="primary-button" data-action="cost-next-question" ${index < total - 1 ? "" : "disabled"} type="button">下一题</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderCostFavoriteButton(question, isFavorite = questionProgress(question.id).isFavorite === true) {
+  return `<button class="favorite-button ${isFavorite ? "active" : ""}" data-action="cost-toggle-favorite" data-question-id="${question.id}" type="button">${isFavorite ? "★ 已收藏" : "☆ 收藏"}</button>`;
+}
+
+function renderCostAnswerBlocks(question, includeExplanation) {
+  const answerTitle = includeExplanation ? "答案解析" : "标准答案";
+  const answerText = includeExplanation
+    ? question.explanation || question.correct_answer || "暂无解析"
+    : question.correct_answer || "暂无标准答案";
+  return `
+    <section class="answer-block cost-answer-panel">
+      <h3>${answerTitle}</h3>
+      <p>${escapeHTML(answerText)}</p>
+    </section>
+    <section class="memory-tip-card cost-memory-tip">
+      <h3 class="memory-tip-title">速记</h3>
+      <p class="memory-tip-content">${escapeHTML(question.memory_tip || "暂无速记")}</p>
+    </section>
+  `;
+}
+
+function renderCostAiChat(question) {
+  return `
+    <section class="calc-ai-chat cost-ai-chat" aria-label="工程造价计算题 AI 答疑">
+      <div>
+        <h3>AI 答疑</h3>
+        <p>看完公式和标准答案后，如果某一步不理解，可以问 AI。</p>
+      </div>
+      <div class="calc-ai-chat-messages" data-cost-ai-messages data-question-id="${escapeHTML(question.id)}">
+        <div class="calc-ai-chat-empty">AI 不读取图片或 PDF，只根据本题文字、公式和标准答案回答。</div>
+      </div>
+      <textarea class="calc-ai-input" data-cost-ai-input placeholder="例如：为什么这里要乘以 1.04？"></textarea>
+      <button class="calc-ai-primary" type="button" data-action="cost-calc-ai-ask" data-id="${escapeHTML(question.id)}">发送问题</button>
+    </section>
+  `;
+}
+
+function moveCostQuestion(delta) {
+  const questions = visibleCostQuestions();
+  if (!questions.length) return;
+  const currentIndex = Number(costReviewIndexByModule[costModuleFilter] || 0);
+  const nextIndex = currentIndex + delta;
+  if (nextIndex < 0 || nextIndex >= questions.length) return;
+  costReviewIndexByModule[costModuleFilter] = nextIndex;
+  reviewProgressService()?.setCurrentQuestion(currentSubjectId, questions[nextIndex]?.id);
+  session.costModuleFilter = costModuleFilter;
+  saveSession();
+  renderSubject();
+  requestAnimationFrame(() => {
+    setupCostSwipe();
+    document.querySelector("[data-cost-swipe-area]")?.scrollIntoView({
+      block: "start",
+      behavior: "smooth",
+    });
+  });
+}
+
+function isCostInteractiveTarget(target) {
+  if (!target) return false;
+  const tagName = target.tagName?.toLowerCase();
+  if (["input", "textarea", "select"].includes(tagName) || target.isContentEditable) return true;
+  return Boolean(target.closest("button, a, input, textarea, select, [role='button'], .quiz-option, .favorite-button, .clear-progress-button, .calc-ai-chat, [data-admin-question-filter]"));
+}
+
+function setupCostSwipe() {
+  const area = document.querySelector("[data-cost-swipe-area]");
+  if (!area || area.dataset.swipeReady === "true") return;
+  area.dataset.swipeReady = "true";
+
+  let startX = 0;
+  let startY = 0;
+  let startTime = 0;
+
+  area.addEventListener("touchstart", (event) => {
+    if (isCostInteractiveTarget(event.target)) {
+      startX = 0;
+      startY = 0;
+      return;
+    }
+    const touch = event.touches && event.touches[0];
+    if (!touch) return;
+    startX = touch.clientX;
+    startY = touch.clientY;
+    startTime = Date.now();
+  }, { passive: true });
+
+  area.addEventListener("touchend", (event) => {
+    if (!startX || !startY) return;
+    const touch = event.changedTouches && event.changedTouches[0];
+    if (!touch) return;
+
+    const deltaX = touch.clientX - startX;
+    const deltaY = touch.clientY - startY;
+    const elapsed = Date.now() - startTime;
+    startX = 0;
+    startY = 0;
+    startTime = 0;
+
+    if (elapsed > 900) return;
+    if (Math.abs(deltaX) < 70) return;
+    if (Math.abs(deltaX) < Math.abs(deltaY) * 1.4) return;
+    moveCostQuestion(deltaX < 0 ? 1 : -1);
+  }, { passive: true });
+}
+
+function saveCostQuestionAnswer(question, answer) {
+  const selectedAnswer = normalizeAnswerKey(answer);
+  const correctAnswer = normalizeAnswerKey(question.correct_answer);
+  const isCorrect = selectedAnswer === correctAnswer;
+  const service = reviewProgressService();
+  if (service?.saveQuestionAnswer) {
+    service.saveQuestionAnswer(question.id, selectedAnswer, isCorrect, question.subject_id);
+  } else {
+    isCorrect ? service?.markKnown?.(question.id, question.subject_id) : service?.markUnknown?.(question.id, question.subject_id);
+  }
+  service?.setCurrentQuestion?.(question.subject_id, question.id);
+  return isCorrect;
+}
+
+async function askCostCalculationAi(questionId, userQuestion) {
+  const question = data.questions.find((item) => item.id === questionId && item.subject_id === COST_MANAGEMENT_SUBJECT_ID);
+  if (!question || !isCalculationQuestion(question)) throw new Error("未找到当前计算题。");
+  const response = await fetch("/api/calc-ai", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(calculationQuestionPayload(question, userQuestion))
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload.ok) {
+    throw new Error(payload.message || payload.error || "AI 暂时无法回答，请稍后重试。");
+  }
+  return payload.answer || "AI 暂时没有返回内容。";
+}
+
+function appendCostCalcAiMessage(role, content) {
+  const box = document.querySelector("[data-cost-ai-messages]");
+  if (!box) return;
+  const empty = box.querySelector(".calc-ai-chat-empty");
+  if (empty) empty.remove();
+  const message = document.createElement("div");
+  message.className = `calc-ai-message ${role}`;
+  const bubble = document.createElement("span");
+  bubble.textContent = content;
+  message.appendChild(bubble);
+  box.appendChild(message);
+  box.scrollTop = box.scrollHeight;
 }
 
 function renderFinalFocus(subject) {
@@ -3877,6 +4387,18 @@ document.addEventListener("keydown", (event) => {
   renderSubject();
 });
 
+document.addEventListener("keydown", (event) => {
+  if (!["Enter", " "].includes(event.key)) return;
+  const card = event.target.closest?.(".cost-reveal-card[data-action='toggle-cost-answer']");
+  if (!card || isCostInteractiveTarget(event.target)) return;
+  event.preventDefault();
+  const questionId = card.dataset.id;
+  if (!questionId) return;
+  revealedCostAnswers.has(questionId) ? revealedCostAnswers.delete(questionId) : revealedCostAnswers.add(questionId);
+  reviewProgressService()?.markReviewed?.(questionId, currentSubjectId);
+  renderSubject();
+});
+
 document.addEventListener("click", async (event) => {
   const actionTarget = event.target.closest("[data-action]");
   const button = event.target.closest("button") || actionTarget;
@@ -4030,8 +4552,12 @@ document.addEventListener("click", async (event) => {
     focusDrawerId = "";
     focusDrawerEditing = false;
     revealedContractAnswers.clear();
+    revealedCostAnswers.clear();
     Object.keys(contractReviewIndexByType).forEach((key) => {
       contractReviewIndexByType[key] = 0;
+    });
+    Object.keys(costReviewIndexByModule).forEach((key) => {
+      costReviewIndexByModule[key] = 0;
     });
     toast("已清空当前科目的做题记录，收藏已保留。");
     renderSubject();
@@ -4081,6 +4607,105 @@ document.addEventListener("click", async (event) => {
       );
     }
     renderSubject();
+    return;
+  }
+
+  if (action === "cost-module-filter") {
+    const nextModule = button.dataset.value;
+    if (COST_MODULE_TABS.some((tab) => tab.value === nextModule && !tab.disabled)) {
+      costModuleFilter = nextModule;
+      costFavoriteFilter = "all";
+      costReviewIndexByModule[costModuleFilter] = 0;
+      session.costModuleFilter = costModuleFilter;
+      saveSession();
+      renderSubject();
+    }
+    return;
+  }
+
+  if (action === "cost-case-disabled") {
+    toast("案例分析资料暂未导入。");
+    return;
+  }
+
+  if (action === "cost-favorite-filter") {
+    costFavoriteFilter = button.dataset.value === "favorite" ? "favorite" : "all";
+    costReviewIndexByModule[costModuleFilter] = 0;
+    renderSubject();
+    return;
+  }
+
+  if (action === "cost-answer-option") {
+    const question = data.questions.find((item) => item.id === button.dataset.questionId);
+    if (!question) return toast("题目不存在");
+    if (questionProgress(question.id).selectedAnswer) return;
+    const isCorrect = saveCostQuestionAnswer(question, button.dataset.answer);
+    renderSubject();
+    toast(isCorrect ? "回答正确" : `回答错误，正确答案是 ${displayCorrectAnswer(question)}`);
+    return;
+  }
+
+  if (action === "cost-prev-question" || action === "cost-next-question") {
+    moveCostQuestion(action === "cost-next-question" ? 1 : -1);
+    return;
+  }
+
+  if (action === "cost-reset-answer") {
+    const question = data.questions.find((item) => item.id === button.dataset.questionId);
+    if (!question) return;
+    reviewProgressService()?.resetQuestionAnswer?.(question.id, question.subject_id);
+    renderSubject();
+    return;
+  }
+
+  if (action === "toggle-cost-answer") {
+    if (isCostInteractiveTarget(event.target) && event.target !== button) return;
+    const questionId = button.dataset.id || button.dataset.questionId;
+    revealedCostAnswers.has(questionId) ? revealedCostAnswers.delete(questionId) : revealedCostAnswers.add(questionId);
+    if (questionId) reviewProgressService()?.markReviewed?.(questionId, currentSubjectId);
+    renderSubject();
+    return;
+  }
+
+  if (action === "cost-toggle-favorite") {
+    const questionId = button.dataset.questionId;
+    if (questionId) reviewProgressService()?.toggleFavorite(questionId);
+    if (costFavoriteFilter === "favorite" && questionId && !questionProgress(questionId).isFavorite) {
+      const questions = costModuleQuestions().filter((question) => questionProgress(question.id).isFavorite);
+      costReviewIndexByModule[costModuleFilter] = Math.max(
+        0,
+        Math.min(Number(costReviewIndexByModule[costModuleFilter] || 0), questions.length - 1)
+      );
+    }
+    renderSubject();
+    return;
+  }
+
+  if (action === "cost-calc-ai-ask") {
+    const questionId = button.dataset.id;
+    const chat = button.closest(".cost-ai-chat");
+    const input = chat?.querySelector("[data-cost-ai-input]");
+    const userQuestion = input ? input.value.trim() : "";
+
+    if (!userQuestion) {
+      toast("请输入你不理解的问题");
+      return;
+    }
+
+    try {
+      button.disabled = true;
+      button.textContent = "思考中...";
+      appendCostCalcAiMessage("user", userQuestion);
+      if (input) input.value = "";
+      const answer = await askCostCalculationAi(questionId, userQuestion);
+      appendCostCalcAiMessage("assistant", answer);
+    } catch (error) {
+      console.error(error);
+      appendCostCalcAiMessage("assistant", error.message || "AI 暂时无法回答，请稍后重试。");
+    } finally {
+      button.disabled = false;
+      button.textContent = "发送问题";
+    }
     return;
   }
 
