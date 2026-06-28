@@ -781,6 +781,8 @@ function syncCostManagementQuestions(current, seeds = []) {
       question_content: seed.question_content || seed.problem_text || seed.title,
       title: seed.title || seed.question_content,
       correct_answer: seed.correct_answer || seed.standard_answer || "",
+      concise_answer: seed.concise_answer || "",
+      concise_incomplete: seed.concise_incomplete === true,
       source: seed.source || "工程造价管理复习资料",
       source_status: seed.source_status || (complete ? "已有书本来源" : "资料不完整"),
       memory_tip: seed.memory_tip || "",
@@ -982,6 +984,8 @@ function normalizeQuestion(question) {
     source: question.source || "管理员录入",
     source_status: question.source_status || "已有书本来源",
     tags: Array.isArray(question.tags) ? question.tags : [],
+    concise_answer: question.concise_answer || question.conciseAnswer || "",
+    concise_incomplete: question.concise_incomplete === true || question.conciseIncomplete === true,
     memory_tip: question.memory_tip || question.mnemonic || question.tip || "",
     source_page: question.source_page || question.sourcePage || "",
     incomplete: question.incomplete === true,
@@ -2946,6 +2950,9 @@ function renderCostFavoriteButton(question, isFavorite = questionProgress(questi
 }
 
 function renderCostAnswerBlocks(question, includeExplanation) {
+  if (!includeExplanation && costModuleFilter === "short_answer") {
+    return renderCostShortAnswerBlocks(question);
+  }
   const answerTitle = includeExplanation ? "答案解析" : "标准答案";
   const answerText = includeExplanation
     ? question.explanation || question.correct_answer || "暂无解析"
@@ -2958,6 +2965,33 @@ function renderCostAnswerBlocks(question, includeExplanation) {
     <section class="memory-tip-card cost-memory-tip">
       <h3 class="memory-tip-title">速记</h3>
       <p class="memory-tip-content">${escapeHTML(question.memory_tip || "暂无速记")}</p>
+    </section>
+  `;
+}
+
+function renderTextWithLineBreaks(value) {
+  return escapeHTML(value || "").replace(/\n/g, "<br>");
+}
+
+function renderCostShortAnswerBlocks(question) {
+  return `
+    ${question.concise_answer ? `
+      <section class="short-concise-answer">
+        <h3>简洁答案</h3>
+        <p class="answer-helper">考前背关键词用。</p>
+        <div>${renderTextWithLineBreaks(question.concise_answer)}</div>
+        ${question.concise_incomplete ? `<p class="answer-helper">这道题的简洁答案建议结合完整答案复核。</p>` : ""}
+      </section>
+    ` : ""}
+    <section class="short-full-answer">
+      <h3>完整答案</h3>
+      <p class="answer-helper">原资料完整答案，适合补充理解。</p>
+      <div>${renderTextWithLineBreaks(question.correct_answer || "暂无标准答案")}</div>
+    </section>
+    <section class="short-memory-tip">
+      <h3>速记</h3>
+      <p class="answer-helper">帮助快速记忆。</p>
+      <div>${renderTextWithLineBreaks(question.memory_tip || "暂无速记")}</div>
     </section>
   `;
 }
